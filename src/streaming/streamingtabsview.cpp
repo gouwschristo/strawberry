@@ -79,6 +79,9 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->artists_collection->view()->Init(service_->artists_collection_backend(), service_->artists_collection_model(), true, service_->supports_downloads(), service_->supports_album_tracks());
     QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::PlaySongsSignal, this, &StreamingTabsView::PlaySongs);
     QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::QueueSongsSignal, this, &StreamingTabsView::QueueSongs);
+    ui_->artists_collection->view()->SetContainerSongFactory([this](const QString &id, const QString &name, const QString &parent, const bool artist_level) {
+      return service_->ContainerSong(id, name, parent, artist_level);
+    });
     QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->artists_collection->view()->setModel(service_->artists_collection_filter_model());
     ui_->artists_collection->view()->SetFilter(ui_->artists_collection->filter_widget());
@@ -116,6 +119,9 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->albums_collection->view()->Init(service_->albums_collection_backend(), service_->albums_collection_model(), true, service_->supports_downloads(), service_->supports_album_tracks());
     QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::PlaySongsSignal, this, &StreamingTabsView::PlaySongs);
     QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::QueueSongsSignal, this, &StreamingTabsView::QueueSongs);
+    ui_->albums_collection->view()->SetContainerSongFactory([this](const QString &id, const QString &name, const QString &parent, const bool artist_level) {
+      return service_->ContainerSong(id, name, parent, artist_level);
+    });
     QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->albums_collection->view()->setModel(service_->albums_collection_filter_model());
     ui_->albums_collection->view()->SetFilter(ui_->albums_collection->filter_widget());
@@ -153,6 +159,9 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->songs_collection->view()->Init(service_->songs_collection_backend(), service_->songs_collection_model(), true, service_->supports_downloads(), service_->supports_album_tracks());
     QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::PlaySongsSignal, this, &StreamingTabsView::PlaySongs);
     QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::QueueSongsSignal, this, &StreamingTabsView::QueueSongs);
+    ui_->songs_collection->view()->SetContainerSongFactory([this](const QString &id, const QString &name, const QString &parent, const bool artist_level) {
+      return service_->ContainerSong(id, name, parent, artist_level);
+    });
     QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->songs_collection->view()->setModel(service_->songs_collection_filter_model());
     ui_->songs_collection->view()->SetFilter(ui_->songs_collection->filter_widget());
@@ -428,6 +437,7 @@ void StreamingTabsView::OpenSongsInNewPlaylist(const SongList &songs) {
 
 
 
+
 void StreamingTabsView::QueueSongs(const SongList &songs, const bool next) {
 
   ResolveOrEmitSongs(songs, next ? TracksAction::EnqueueNext : TracksAction::Enqueue);
@@ -435,6 +445,7 @@ void StreamingTabsView::QueueSongs(const SongList &songs, const bool next) {
 }
 
 void StreamingTabsView::ResolveOrEmitSongs(const SongList &songs, const TracksAction action) {
+
 
   SongList tracks;
 
@@ -457,7 +468,7 @@ void StreamingTabsView::ResolveOrEmitSongs(const SongList &songs, const TracksAc
       if (!service_->supports_album_tracks()) continue;
       tracks_action_ = action;
       if (!song.album_id().isEmpty()) service_->GetAlbumTracks(song);
-      else service_->GetArtistTracks(song);
+      else service_->GetAllArtistTracks(song);
     }
     else {
       tracks << song;

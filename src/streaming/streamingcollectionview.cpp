@@ -480,8 +480,45 @@ void StreamingCollectionView::scrollTo(const QModelIndex &idx, ScrollHint hint) 
 
 SongList StreamingCollectionView::GetSelectedSongs() const {
 
-  QModelIndexList selected_indexes = qobject_cast<QSortFilterProxyModel*>(model())->mapSelectionToSource(selectionModel()->selection()).indexes();
-  return collection_model_->GetChildSongs(selected_indexes);
+  auto *proxy = qobject_cast<QSortFilterProxyModel*>(model());
+  if (!proxy || !collection_model_) return SongList();
+
+  const QModelIndexList selected_indexes = proxy->mapSelectionToSource(selectionModel()->selection()).indexes();
+
+  SongList songs;
+  for (const QModelIndex &index : selected_indexes) {
+    if (!index.isValid() || index.data(CollectionModel::Role_IsDivider).toBool()) continue;
+
+    const QString container_id = index.data(CollectionModel::Role_ContainerId).toString();
+    const bool is_container = !container_id.isEmpty();
+    const int group_by = index.data(CollectionModel::Role_ContainerType).toInt();
+    const bool artist_level = group_by == static_cast<int>(CollectionModel::GroupBy::Artist) ||
+                              group_by == static_cast<int>(CollectionModel::GroupBy::AlbumArtist);
+
+    // An artist row always resolves to *all* of its tracks: the songs already in the tree are
+    // only the albums that happen to have been expanded, so hand over a descriptor instead.
+    if (is_container && artist_level && container_song_factory_) {
+      const Song container = container_song_factory_(container_id, index.data(Qt::DisplayRole).toString(),
+                                                     index.parent().data(Qt::DisplayRole).toString(), true);
+      if (container.is_valid()) songs << container;
+      continue;
+    }
+
+    const SongList children = collection_model_->GetChildSongs(index);
+    if (!children.isEmpty()) {
+      songs << children;
+      continue;
+    }
+
+    // An album row that has never been expanded has no children: describe it instead.
+    if (is_container && container_song_factory_) {
+      const Song container = container_song_factory_(container_id, index.data(Qt::DisplayRole).toString(),
+                                                     index.parent().data(Qt::DisplayRole).toString(), false);
+      if (container.is_valid()) songs << container;
+    }
+  }
+
+  return songs;
 
 }
 

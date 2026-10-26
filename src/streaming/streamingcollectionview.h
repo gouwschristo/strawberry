@@ -56,6 +56,11 @@ class StreamingCollectionView : public AutoExpandingTreeView {
 
   void Init(const SharedPtr<CollectionBackend> collection_backend, CollectionModel *collection_model, const bool favorite = false, const bool downloadable = false, const bool expandable = false);
 
+  // Container rows (albums/artists) have no child songs until they are expanded, so the
+  // view asks the service for a descriptor song instead of losing the selection.
+  using ContainerSongFactory = std::function<Song(const QString &id, const QString &name, const QString &parent_name, const bool artist_level)>;
+  void SetContainerSongFactory(ContainerSongFactory factory) { container_song_factory_ = std::move(factory); }
+
   // Returns Songs currently selected in the collection view.
   // Please note that the selection is recursive meaning that if for example an album is selected this will return all of it's songs.
   SongList GetSelectedSongs() const;
@@ -142,6 +147,7 @@ class StreamingCollectionView : public AutoExpandingTreeView {
   QAction *add_container_;
   bool downloadable_;
   bool expandable_;
+  ContainerSongFactory container_song_factory_;
 
   bool is_in_keyboard_search_;
 

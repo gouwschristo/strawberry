@@ -158,6 +158,8 @@ class YouTubeMusicService : public StreamingService {
   void GetArtistTracks(const Song &artist) override;
   void ExpandAlbumRow(const Song &album, const bool artists_view) override;
   void ExpandArtistRow(const Song &artist) override;
+  Song ContainerSong(const QString &id, const QString &name, const QString &parent_name, const bool artist_level) const override;
+  void GetAllArtistTracks(const Song &artist) override;
   void DownloadSongs(const SongList &songs) override;
   void ResetArtistsRequest() override;
   void ResetAlbumsRequest() override;
@@ -188,6 +190,9 @@ class YouTubeMusicService : public StreamingService {
   void StartNextDownload();
   void StartNextDownloadContainer();
   void StartNextExpansion();
+  void ArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error);
+  void ArtistAlbumTracksReceived(const int id, const SongMap &songs, const QString &error);
+  void StartNextArtistAlbumTracks();
 
   const SharedPtr<TaskManager> task_manager_;
   const SharedPtr<NetworkAccessManager> network_;
@@ -259,6 +264,10 @@ class YouTubeMusicService : public StreamingService {
   int current_download_index_;
   SongList download_containers_;
   YouTubeMusicRequestPtr download_container_request_;
+  // Walking an artist's albums to collect every track for "add to playlist".
+  SongList artist_tracks_albums_;
+  SongList artist_tracks_collected_;
+  YouTubeMusicRequestPtr artist_walk_request_;
   YouTubeMusicDownloadRequest *download_request_;
   int download_task_id_;
 };

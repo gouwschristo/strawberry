@@ -899,6 +899,98 @@ void YouTubeMusicService::ExpandAlbumRow(const Song &album, const bool artists_v
 
 }
 
+Song YouTubeMusicService::ContainerSong(const QString &id, const QString &name, const QString &parent_name, const bool artist_level) const {
+
+  Song song(Song::Source::YouTubeMusic);
+  song.set_valid(true);
+  song.set_directory_id(0);
+
+  if (artist_level) {
+    song.set_url(QUrl(QStringLiteral("youtubemusic://artist/%1").arg(id)));
+    song.set_artist(name);
+    song.set_artist_id(id);
+  }
+  else {
+    song.set_url(QUrl(QStringLiteral("youtubemusic://album/%1").arg(id)));
+    song.set_album(name);
+    song.set_album_id(id);
+    song.set_artist(parent_name);
+    song.set_albumartist(parent_name);
+  }
+
+  return song;
+
+}
+
+void YouTubeMusicService::GetAllArtistTracks(const Song &artist) {
+
+  artist_tracks_albums_.clear();
+  artist_tracks_collected_.clear();
+
+  artist_walk_request_.reset(new YouTubeMusicRequest(this, network_, this));
+  QObject::connect(&*artist_walk_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistAlbumsReceived);
+  QObject::connect(&*artist_walk_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::SongsUpdateStatusReceived);
+  Q_EMIT SongsUpdateStatus(tr("Collecting albums of %1...").arg(artist.artist()));
+  artist_walk_request_->ProcessArtistAlbums(artist);
+
+}
+
+void YouTubeMusicService::ArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error) {
+
+  Q_UNUSED(id);
+
+  artist_walk_request_.reset();
+
+  if (!error.isEmpty() || songs.isEmpty()) {
+    Q_EMIT AlbumTracksLoaded(SongList(), error.isEmpty() ? tr("No albums found for this artist.") : error);
+    return;
+  }
+
+  for (const Song &album : songs) {
+    if (!album.album_id().isEmpty()) artist_tracks_albums_ << album;
+  }
+
+  qLog(Info) << "YouTubeMusic: collecting tracks from" << artist_tracks_albums_.count() << "album(s)";
+  StartNextArtistAlbumTracks();
+
+}
+
+void YouTubeMusicService::StartNextArtistAlbumTracks() {
+
+  if (artist_tracks_albums_.isEmpty()) {
+    Q_EMIT SongsUpdateStatus(QString());
+    Q_EMIT AlbumTracksLoaded(artist_tracks_collected_, QString());
+    return;
+  }
+
+  const Song album = artist_tracks_albums_.takeFirst();
+  Q_EMIT SongsUpdateStatus(tr("Collecting tracks: %1 (%2 left)").arg(album.album()).arg(artist_tracks_albums_.count()));
+
+  artist_walk_request_.reset(new YouTubeMusicRequest(this, network_, this));
+  QObject::connect(&*artist_walk_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistAlbumTracksReceived);
+  artist_walk_request_->ProcessAlbum(album);
+
+}
+
+void YouTubeMusicService::ArtistAlbumTracksReceived(const int id, const SongMap &songs, const QString &error) {
+
+  Q_UNUSED(id);
+
+  artist_walk_request_.reset();
+
+  if (error.isEmpty()) {
+    for (const Song &song : songs) {
+      if (song.song_id().isEmpty()) continue;
+      const bool duplicate = std::any_of(artist_tracks_collected_.cbegin(), artist_tracks_collected_.cend(),
+                                         [&song](const Song &existing) { return existing.song_id() == song.song_id(); });
+      if (!duplicate) artist_tracks_collected_ << song;
+    }
+  }
+
+  StartNextArtistAlbumTracks();
+
+}
+
 void YouTubeMusicService::ExpandArtistRow(const Song &artist) {
 
   if (artist.artist_id().isEmpty()) return;

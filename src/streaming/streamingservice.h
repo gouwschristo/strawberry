@@ -65,6 +65,16 @@ class StreamingService : public QObject {
   // adding an unplayable placeholder row to the playlist.
   virtual bool supports_album_tracks() const { return false; }
 
+  // Builds a song that describes an album/artist container row so it can be resolved into
+  // tracks (the views have no idea which url scheme a service uses).
+  virtual Song ContainerSong(const QString &id, const QString &name, const QString &parent_name, const bool artist_level) const {
+    Q_UNUSED(id);
+    Q_UNUSED(name);
+    Q_UNUSED(parent_name);
+    Q_UNUSED(artist_level);
+    return Song();
+  }
+
   // Services that can save a song to disk expose a "Download" entry in the views.
   virtual bool supports_downloads() const { return false; }
 
@@ -96,6 +106,9 @@ class StreamingService : public QObject {
   virtual void ExpandAlbumRow(const Song &album, const bool artists_view) { Q_UNUSED(album); Q_UNUSED(artists_view); }
   virtual void ExpandArtistRow(const Song &artist) { Q_UNUSED(artist); }
   virtual void DownloadSongs(const SongList &songs) { Q_UNUSED(songs); }
+  // Resolves an artist row into *all* its tracks (albums and their tracks). Services that
+  // cannot do better fall back to the top-songs call.
+  virtual void GetAllArtistTracks(const Song &artist) { GetArtistTracks(artist); }
   virtual void ResetAlbumsRequest() {}
   virtual void ResetSongsRequest() {}
 
