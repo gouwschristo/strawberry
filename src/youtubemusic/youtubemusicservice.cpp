@@ -535,6 +535,7 @@ void YouTubeMusicService::GetArtists() {
   }
 
   artists_request_.reset(new YouTubeMusicRequest(this, network_, this));
+  if (page_budget_ > 0) (*artists_request_).set_page_budget(page_budget_);
   QObject::connect(&*artists_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistsResultsReceived);
   QObject::connect(&*artists_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::ArtistsUpdateStatusReceived);
 
@@ -550,6 +551,7 @@ void YouTubeMusicService::GetAlbums() {
   }
 
   albums_request_.reset(new YouTubeMusicRequest(this, network_, this));
+  if (page_budget_ > 0) (*albums_request_).set_page_budget(page_budget_);
   QObject::connect(&*albums_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::AlbumsResultsReceived);
   QObject::connect(&*albums_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::AlbumsUpdateStatusReceived);
 
@@ -565,10 +567,44 @@ void YouTubeMusicService::GetSongs() {
   }
 
   songs_request_.reset(new YouTubeMusicRequest(this, network_, this));
+  if (page_budget_ > 0) (*songs_request_).set_page_budget(page_budget_);
   QObject::connect(&*songs_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::SongsResultsReceived);
   QObject::connect(&*songs_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::SongsUpdateStatusReceived);
 
   songs_request_->Process(YouTubeMusicRequest::Type::LibrarySongs);
+
+}
+
+void YouTubeMusicService::LoadMoreArtists() {
+
+  // The request layer defaults to 20 library pages, so "more" has to start above that.
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : 20) + 10;
+  qLog(Info) << "YouTubeMusic: loading more artists (page budget" << page_budget_ << ")";
+  GetArtists();
+
+}
+
+void YouTubeMusicService::LoadMoreAlbums() {
+
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : 20) + 10;
+  qLog(Info) << "YouTubeMusic: loading more albums (page budget" << page_budget_ << ")";
+  GetAlbums();
+
+}
+
+void YouTubeMusicService::LoadMoreSongs() {
+
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : 20) + 10;
+  qLog(Info) << "YouTubeMusic: loading more songs (page budget" << page_budget_ << ")";
+  GetSongs();
+
+}
+
+void YouTubeMusicService::LoadMoreSearch(const QString &query) {
+
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : 5) + 5;
+  qLog(Info) << "YouTubeMusic: loading more search results for" << query;
+  Q_EMIT Search(query, YouTubeMusicService::SearchType::Songs);
 
 }
 

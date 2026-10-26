@@ -154,6 +154,12 @@ class YouTubeMusicService : public StreamingService {
   void GetArtists() override;
   void GetAlbums() override;
   void GetSongs() override;
+  // Asks for more of a list: raises the page budget and refetches it (rows are de-duplicated
+  // by id, so this appends to what is already there).
+  void LoadMoreArtists() override;
+  void LoadMoreAlbums() override;
+  void LoadMoreSongs() override;
+  void LoadMoreSearch(const QString &query);
   void GetAlbumTracks(const Song &album) override;
   void GetArtistTracks(const Song &artist) override;
   void ExpandAlbumRow(const Song &album, const bool artists_view) override;
@@ -210,6 +216,7 @@ class YouTubeMusicService : public StreamingService {
   YouTubeMusicRequestPtr artists_request_;
   YouTubeMusicRequestPtr albums_request_;
   YouTubeMusicRequestPtr songs_request_;
+  int page_budget_ = 0;   // raised by "load more", 0 = request defaults
   YouTubeMusicRequestPtr search_request_;
   YouTubeMusicRequestPtr album_tracks_request_;
   YouTubeMusicRequestPtr artist_tracks_request_;

@@ -44,6 +44,7 @@ class CollectionItem : public SimpleTreeItem<CollectionItem> {
   // For containers: the service id of the album/artist this container describes, so the
   // view can expand it without a placeholder child row.
   QString container_id;
+  QString artist_id;
   bool expandable = false;
 
  private:

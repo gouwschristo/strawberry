@@ -536,7 +536,8 @@ void YouTubeMusicRequest::ReplyFinished() {
   // library is pulled in instead of just the first 25/22/13 rows.
   const QString continuation = FindContinuation(result.json_object);
   const bool is_library = type_ == Type::LibraryArtists || type_ == Type::LibraryAlbums || type_ == Type::LibrarySongs;
-  const int max_pages = is_library ? kMaxLibraryPages : kMaxSearchPages;
+  const int default_pages = is_library ? kMaxLibraryPages : kMaxSearchPages;
+  const int max_pages = page_budget_ > 0 ? page_budget_ : default_pages;
   const bool paginate = type_ != Type::ArtistSongs && type_ != Type::ArtistAlbums;
   const bool limit_reached = !is_library && songs_.count() >= service_->search_limit();
 

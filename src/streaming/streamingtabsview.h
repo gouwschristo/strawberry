@@ -62,6 +62,7 @@ class StreamingTabsView : public QWidget {
   void PlaySongs(const SongList &songs, const bool replace, const bool play);
   void OpenSongsInNewPlaylist(const SongList &songs);
   void QueueSongs(const SongList &songs, const bool next);
+  void GoToContainer(const QString &id, const bool artist_level);
   void ExpandContainerRow(QTreeView *view, const QModelIndex &index, const bool artists_view);
   void FocusSearchField();
 
@@ -94,6 +95,8 @@ class StreamingTabsView : public QWidget {
   // Tracks can arrive from a fetch nothing asked for (an artist walk started elsewhere);
   // only apply them when a playlist action is actually waiting for them.
   bool tracks_action_pending_ = false;
+  // "Go to album/artist" can arrive before the target tab has ever been populated.
+  bool goto_retried_ = false;
   void ResolveOrEmitSongs(const SongList &songs, const TracksAction action);
   QString settings_group_;
   Ui_StreamingTabsView *ui_;

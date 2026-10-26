@@ -83,6 +83,7 @@ class CollectionModel : public SimpleTreeModel<CollectionItem> {
     Role_IsDivider,
     Role_Editable,
     Role_ContainerId,   // service id of an album/artist container (empty when unknown)
+    Role_ArtistId,      // service artist id of the row, for "go to artist"
     LastRole
   };
 

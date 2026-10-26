@@ -82,6 +82,8 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->artists_collection->view()->SetContainerSongFactory([this](const QString &id, const QString &name, const QString &parent, const bool artist_level) {
       return service_->ContainerSong(id, name, parent, artist_level);
     });
+    QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::GoToContainerSignal, this, &StreamingTabsView::GoToContainer);
+    QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::LoadMoreSignal, this, [this]() { service_->LoadMoreArtists(); });
     QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->artists_collection->view()->setModel(service_->artists_collection_filter_model());
     ui_->artists_collection->view()->SetFilter(ui_->artists_collection->filter_widget());
@@ -122,6 +124,8 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->albums_collection->view()->SetContainerSongFactory([this](const QString &id, const QString &name, const QString &parent, const bool artist_level) {
       return service_->ContainerSong(id, name, parent, artist_level);
     });
+    QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::GoToContainerSignal, this, &StreamingTabsView::GoToContainer);
+    QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::LoadMoreSignal, this, [this]() { service_->LoadMoreAlbums(); });
     QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->albums_collection->view()->setModel(service_->albums_collection_filter_model());
     ui_->albums_collection->view()->SetFilter(ui_->albums_collection->filter_widget());
@@ -162,6 +166,8 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->songs_collection->view()->SetContainerSongFactory([this](const QString &id, const QString &name, const QString &parent, const bool artist_level) {
       return service_->ContainerSong(id, name, parent, artist_level);
     });
+    QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::GoToContainerSignal, this, &StreamingTabsView::GoToContainer);
+    QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::LoadMoreSignal, this, [this]() { service_->LoadMoreSongs(); });
     QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->songs_collection->view()->setModel(service_->songs_collection_filter_model());
     ui_->songs_collection->view()->SetFilter(ui_->songs_collection->filter_widget());
@@ -437,6 +443,47 @@ void StreamingTabsView::OpenSongsInNewPlaylist(const SongList &songs) {
 
 
 
+
+void StreamingTabsView::GoToContainer(const QString &id, const bool artist_level) {
+
+  if (id.isEmpty()) return;
+
+  StreamingCollectionView *view = artist_level ? ui_->artists_collection->view() : ui_->albums_collection->view();
+  // The collection widgets live inside page widgets, so switch by page, not by view.
+  ui_->tabs->setCurrentWidget(artist_level ? ui_->artists : ui_->albums);
+
+  // The container may sit anywhere in the tree, so look it up depth first.
+  QAbstractItemModel *model = view->model();
+  std::function<QModelIndex(const QModelIndex &)> find = [&](const QModelIndex &parent) -> QModelIndex {
+    for (int row = 0; row < model->rowCount(parent); ++row) {
+      const QModelIndex index = model->index(row, 0, parent);
+      if (index.data(CollectionModel::Role_ContainerId).toString() == id) return index;
+      const QModelIndex found = find(index);
+      if (found.isValid()) return found;
+    }
+    return QModelIndex();
+  };
+
+  const QModelIndex target = find(QModelIndex());
+  if (!target.isValid()) {
+    // The target tab may never have been shown, so its list is still empty: load it once and
+    // look again shortly after.
+    if (!goto_retried_) {
+      goto_retried_ = true;
+      if (artist_level) GetArtists(); else GetAlbums();
+      QTimer::singleShot(2500, this, [this, id, artist_level]() { GoToContainer(id, artist_level); });
+      return;
+    }
+    goto_retried_ = false;
+    return;
+  }
+  goto_retried_ = false;
+
+  view->setCurrentIndex(target);
+  view->scrollTo(target);
+  view->setFocus();
+
+}
 
 void StreamingTabsView::QueueSongs(const SongList &songs, const bool next) {
 

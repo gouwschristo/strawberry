@@ -366,6 +366,9 @@ QVariant CollectionModel::data(CollectionItem *item, const int role) const {
     case Role_ContainerId:
       return item->container_id;
 
+    case Role_ArtistId:
+      return item->artist_id;
+
     case Role_Editable:{
       if (item->type == CollectionItem::Type::Container) {
         // If we have even one non editable item as a child, we ourselves are not available for edit
@@ -945,7 +948,13 @@ CollectionItem *CollectionModel::CreateContainerItem(const GroupBy group_by, con
   item->expandable = IsContainerDescriptor(song);
   if (IsArtistGroupBy(group_by)) item->container_id = song.artist_id();
   else if (IsAlbumGroupBy(group_by)) item->container_id = song.album_id();
+  item->artist_id = song.artist_id();
   item->display_text = DisplayText(group_by, song);
+  // Album rows carry the release year from the service: show it while browsing, sorted by
+  // the name as before (sort_text is untouched).
+  if (group_by == GroupBy::Album && song.year() > 0) {
+    item->display_text += u" (%1)"_s.arg(song.year());
+  }
   item->sort_text = SortText(group_by, song, options_active_.sort_skip_articles_for_artists, options_active_.sort_skip_articles_for_albums, options_active_.use_sort_tags);
   if (!divider_key.isEmpty()) {
     item->sort_text.prepend(divider_key + QLatin1Char(' '));
@@ -997,6 +1006,8 @@ void CollectionModel::SetSongItemData(CollectionItem *item, const Song &song) co
   if (display_text.isEmpty()) display_text = song.artist();
   if (display_text.isEmpty()) display_text = tr("Unknown");
   item->display_text = display_text;
+  item->artist_id = song.artist_id();
+  item->container_id = song.album_id();
   item->sort_text = HasParentAlbumGroupBy(item->parent) ? SortTextForSong(song) : SortText(song.title());
   item->metadata = song;
 

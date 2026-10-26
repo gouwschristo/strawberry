@@ -99,6 +99,40 @@ void StreamingCollectionView::Init(const SharedPtr<CollectionBackend> collection
 
 }
 
+void StreamingCollectionView::keyPressEvent(QKeyEvent *e) {
+
+  // Ctrl+F jumps to the filter, like every other list in the app.
+  if (e->key() == Qt::Key_F && (e->modifiers() & Qt::ControlModifier)) {
+    Q_EMIT FocusOnFilterSignal(e);
+    e->accept();
+    return;
+  }
+
+  // Enter toggles a container instead of doing nothing; expanding it triggers the same
+  // fetch as clicking the arrow, because the view listens to its own expanded() signal.
+  if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && currentIndex().isValid()) {
+    const QModelIndex index = currentIndex();
+    if (!index.data(CollectionModel::Role_ContainerId).toString().isEmpty()) {
+      const bool expanding = !isExpanded(index);
+      setExpanded(index, expanding);
+      if (expanding) scrollTo(index);
+      e->accept();
+      return;
+    }
+  }
+
+  // Typing a printable character starts a filter, like the local collection does.
+  const QString text = e->text();
+  if (!text.isEmpty() && text.at(0).isPrint() && !(e->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+    Q_EMIT FocusOnFilterSignal(e);
+    e->accept();
+    return;
+  }
+
+  AutoExpandingTreeView::keyPressEvent(e);
+
+}
+
 void StreamingCollectionView::SetFilter(CollectionFilterWidget *filter) {
 
   filter_ = filter;
@@ -350,6 +384,15 @@ void StreamingCollectionView::contextMenuEvent(QContextMenuEvent *e) {
     }
 
     context_menu_->addSeparator();
+    expand_all_ = context_menu_->addAction(tr("Expand all"), this, &StreamingCollectionView::ExpandAllSelected);
+    collapse_all_ = context_menu_->addAction(tr("Collapse all"), this, &StreamingCollectionView::CollapseAllSelected);
+    goto_artist_ = context_menu_->addAction(tr("Go to artist"), this, &StreamingCollectionView::GoToArtist);
+    goto_album_ = context_menu_->addAction(tr("Go to album"), this, &StreamingCollectionView::GoToAlbum);
+
+    context_menu_->addSeparator();
+    load_more_ = context_menu_->addAction(tr("Load more"), this, &StreamingCollectionView::LoadMore);
+
+    context_menu_->addSeparator();
 
     if (favorite_) {
       remove_songs_ = context_menu_->addAction(IconLoader::Load(u"edit-delete"_s), tr("Remove from favorites"), this, &StreamingCollectionView::RemoveSelectedSongs);
@@ -391,7 +434,70 @@ void StreamingCollectionView::contextMenuEvent(QContextMenuEvent *e) {
   add_to_playlist_enqueue_->setEnabled(songs_selected > 0);
   if (remove_songs_) remove_songs_->setEnabled(songs_selected > 0);
 
+  // Tree actions only make sense on a container; navigation only on a row that knows its ids.
+  const QModelIndex clicked = context_menu_index_;
+  const bool container_clicked = !clicked.data(CollectionModel::Role_ContainerId).toString().isEmpty();
+  if (expand_all_) expand_all_->setVisible(container_clicked);
+  if (collapse_all_) collapse_all_->setVisible(container_clicked);
+
+  QString album_id, artist_id;
+  for (const QModelIndex &idx : selected_indexes) {
+    if (album_id.isEmpty()) album_id = idx.data(CollectionModel::Role_ContainerId).toString();
+    if (artist_id.isEmpty()) artist_id = idx.data(CollectionModel::Role_ArtistId).toString();
+  }
+  if (goto_artist_) goto_artist_->setVisible(!artist_id.isEmpty());
+  if (goto_album_) goto_album_->setVisible(!album_id.isEmpty());
+
   context_menu_->popup(e->globalPos());
+
+}
+
+void StreamingCollectionView::ExpandAllSelected() {
+
+  const QModelIndex index = currentIndex();
+  if (!index.isValid()) return;
+
+  // Expanding an album triggers the usual fetch; expanding an artist expands its albums, and
+  // each of those fetches its own tracks. The service serialises the requests.
+  setExpanded(index, true);
+  for (int row = 0; row < model()->rowCount(index); ++row) {
+    const QModelIndex child = model()->index(row, 0, index);
+    if (!child.data(CollectionModel::Role_ContainerId).toString().isEmpty()) setExpanded(child, true);
+  }
+
+}
+
+void StreamingCollectionView::CollapseAllSelected() {
+
+  const QModelIndex index = currentIndex();
+  if (!index.isValid()) return;
+
+  for (int row = 0; row < model()->rowCount(index); ++row) {
+    collapse(model()->index(row, 0, index));
+  }
+  collapse(index);
+
+}
+
+void StreamingCollectionView::GoToArtist() {
+
+  const QModelIndex index = currentIndex();
+  if (!index.isValid()) return;
+  Q_EMIT GoToContainerSignal(index.data(CollectionModel::Role_ArtistId).toString(), true);
+
+}
+
+void StreamingCollectionView::GoToAlbum() {
+
+  const QModelIndex index = currentIndex();
+  if (!index.isValid()) return;
+  Q_EMIT GoToContainerSignal(index.data(CollectionModel::Role_ContainerId).toString(), false);
+
+}
+
+void StreamingCollectionView::LoadMore() {
+
+  Q_EMIT LoadMoreSignal();
 
 }
 

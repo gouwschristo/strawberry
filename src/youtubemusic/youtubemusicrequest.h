@@ -43,6 +43,8 @@ class YouTubeMusicRequest : public YouTubeMusicBaseRequest {
   explicit YouTubeMusicRequest(YouTubeMusicService *service, const SharedPtr<NetworkAccessManager> network, QObject *parent = nullptr);
 
   void Process(const Type type, const int search_id = 0, const QString &query = QString());
+  // "Load more": let this request follow more continuation pages than the default.
+  void set_page_budget(const int pages) { page_budget_ = pages; }
   void ProcessAlbum(const Song &album);
   void ProcessArtist(const Song &artist);
   void ProcessArtistAlbums(const Song &artist);
@@ -71,6 +73,7 @@ class YouTubeMusicRequest : public YouTubeMusicBaseRequest {
   QString error_;
   SongMap songs_;
   int pages_;
+  int page_budget_ = 0;   // 0 = use the built-in caps
   QJsonObject last_body_;
   QString last_endpoint_;
   bool retried_auth_;

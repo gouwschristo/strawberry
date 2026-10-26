@@ -96,6 +96,10 @@ class StreamingService : public QObject {
  public Q_SLOTS:
   virtual void Configure() {}
   virtual void GetArtists() {}
+  // "Load more" for the browser lists; services that page their results implement these.
+  virtual void LoadMoreArtists() {}
+  virtual void LoadMoreAlbums() {}
+  virtual void LoadMoreSongs() {}
   virtual void GetAlbums() {}
   virtual void GetSongs() {}
   virtual void ResetArtistsRequest() {}

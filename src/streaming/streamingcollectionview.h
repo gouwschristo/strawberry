@@ -99,8 +99,14 @@ class StreamingCollectionView : public AutoExpandingTreeView {
   void TotalAlbumCountUpdated_();
   void Error(const QString &error);
   void RemoveSongs(const SongList &songs);
+  // "Go to album/artist": the tabs view owns the tab switching and the tree lookup.
+  void GoToContainerSignal(const QString &id, const bool artist_level);
+  // The tabs view knows which list this view shows, so it does the refetch.
+  void LoadMoreSignal();
 
  protected:
+  void keyPressEvent(QKeyEvent *e) override;
+
   // QWidget
   void paintEvent(QPaintEvent *event) override;
   void mouseReleaseEvent(QMouseEvent *e) override;
@@ -114,6 +120,11 @@ class StreamingCollectionView : public AutoExpandingTreeView {
   void OpenInNewPlaylist();
   void RemoveSelectedSongs();
   void Download();
+  void ExpandAllSelected();
+  void CollapseAllSelected();
+  void GoToArtist();
+  void GoToAlbum();
+  void LoadMore();
   void PlaySelected();
   void AddSelected();
 
@@ -143,6 +154,11 @@ class StreamingCollectionView : public AutoExpandingTreeView {
   QAction *open_in_new_playlist_;
   QAction *remove_songs_;
   QAction *download_;
+  QAction *expand_all_;
+  QAction *collapse_all_;
+  QAction *goto_artist_;
+  QAction *goto_album_;
+  QAction *load_more_;
   QAction *play_container_;
   QAction *add_container_;
   bool downloadable_;
