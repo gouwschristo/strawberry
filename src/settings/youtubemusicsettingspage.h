@@ -40,6 +40,7 @@ class YouTubeMusicSettingsPage : public SettingsPage {
   void Save() override;
   void SignIn();
   void SignOut();
+  void IndexLibrary();
   void ImportCookies();
   void UpdateLoginState();
 
@@ -50,6 +51,7 @@ class YouTubeMusicSettingsPage : public SettingsPage {
   QLabel *label_account_state_;
   QLabel *label_account_detail_;
   QPushButton *button_sign_out_;
+  QPushButton *button_index_library_;
   QComboBox *combobox_cookies_browser_;
   QPushButton *button_sign_in_;
   QPushButton *button_import_cookies_;

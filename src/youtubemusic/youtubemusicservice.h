@@ -162,6 +162,11 @@ class YouTubeMusicService : public StreamingService {
   void LoadMoreAlbums() override;
   void LoadMoreSongs() override;
   void LoadMoreSearch(const QString &query);
+  // Walks every library artist whose index entry is missing or stale and stores its albums
+  // and tracks, so expanding an artist later is a database read instead of a network walk.
+  void IndexLibrary(const int max_artists = -1);
+  void CancelIndexLibrary();
+  bool index_running() const { return index_task_id_ >= 0; }
   void GetAlbumTracks(const Song &album) override;
   void GetArtistTracks(const Song &artist) override;
   void ExpandAlbumRow(const Song &album, const bool artists_view) override;
@@ -201,6 +206,14 @@ class YouTubeMusicService : public StreamingService {
   void ArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error);
   void StartNextArtistAlbumTracks();
   void FinishArtistTrackWalk();
+
+  // indexer state machine
+  void StartNextIndexArtist();
+  void IndexArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error);
+  void StartNextIndexAlbum();
+  void IndexAlbumTracksReceived(const int slot, const SongMap &songs, const QString &error);
+  void FinishIndexAlbum();
+  void FinishIndexLibrary(const QString &error = QString());
 
   const SharedPtr<TaskManager> task_manager_;
   const SharedPtr<NetworkAccessManager> network_;
@@ -282,6 +295,17 @@ class YouTubeMusicService : public StreamingService {
   // One album per request; a few run at a time and the results are kept per album so the
   // collected order stays the album order.
   QHash<int, YouTubeMusicRequest *> artist_walk_requests_;   // parented, deleteLater'd
+  // indexer
+  QStringList index_artist_ids_;
+  QStringList index_artist_names_;
+  int index_cursor_ = 0;
+  SongList index_albums_;
+  int index_next_album_ = 0;
+  int index_albums_total_ = 0;
+  int index_albums_done_ = 0;
+  int index_task_id_ = -1;
+  bool index_cancelled_ = false;
+  QHash<int, YouTubeMusicRequest *> index_requests_;   // parented, deleteLater'd
   QVector<SongList> artist_walk_results_;
   int artist_walk_next_ = 0;
   YouTubeMusicDownloadRequest *download_request_;

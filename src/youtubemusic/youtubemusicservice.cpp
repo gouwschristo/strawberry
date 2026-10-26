@@ -611,6 +611,213 @@ void YouTubeMusicService::GetSongs() {
 
 }
 
+
+void YouTubeMusicService::IndexLibrary(const int max_artists) {
+
+  if (index_task_id_ >= 0) return;   // already running
+
+  // Artists to walk: everything in the library whose index entry is missing or older than the
+  // TTL, oldest first so repeated runs make progress.
+  struct Candidate { QString id; QString name; QString stamp; };
+  QList<Candidate> candidates;
+  {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT DISTINCT artist_id, artist FROM youtubemusic_artists_songs "
+                             "WHERE artist_id <> '' AND artist <> ''"));
+    if (!q.Exec()) {
+      database_->ReportErrors(q);
+      return;
+    }
+    while (q.next()) candidates << Candidate{q.value(0).toString(), q.value(1).toString(), QString()};
+  }
+
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  const QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
+  s.endGroup();
+
+  const QDateTime now = QDateTime::currentDateTime();
+  QList<Candidate> stale;
+  for (const Candidate &candidate : std::as_const(candidates)) {
+    const QDateTime stamp = QDateTime::fromString(indexed.value(candidate.id).toString(), Qt::ISODate);
+    if (stamp.isValid() && stamp.secsTo(now) < YouTubeMusicSettings::kIndexTtlDays * 24 * 60 * 60) continue;
+    stale << candidate;
+  }
+  std::sort(stale.begin(), stale.end(), [&indexed](const Candidate &a, const Candidate &b) {
+    return indexed.value(a.id).toString() < indexed.value(b.id).toString();
+  });
+
+  if (max_artists > 0 && stale.count() > max_artists) stale = stale.mid(0, max_artists);
+
+  index_artist_ids_.clear();
+  index_artist_names_.clear();
+  for (const Candidate &candidate : std::as_const(stale)) {
+    index_artist_ids_ << candidate.id;
+    index_artist_names_ << candidate.name;
+  }
+  index_cursor_ = 0;
+  index_cancelled_ = false;
+
+  if (index_artist_ids_.isEmpty()) {
+    qLog(Info) << "YouTubeMusic: nothing to index, every artist is fresh";
+    Q_EMIT SongsUpdateStatus(tr("Library index is up to date."));
+    return;
+  }
+
+  index_task_id_ = task_manager_->StartTask(tr("Indexing YouTube Music library"));
+  qLog(Info) << "YouTubeMusic: indexing" << index_artist_ids_.count() << "artist(s)";
+  StartNextIndexArtist();
+
+}
+
+void YouTubeMusicService::CancelIndexLibrary() {
+
+  if (index_task_id_ < 0) return;
+  index_cancelled_ = true;
+
+}
+
+void YouTubeMusicService::StartNextIndexArtist() {
+
+  for (YouTubeMusicRequest *request : std::as_const(index_requests_)) {
+    if (request) request->deleteLater();
+  }
+  index_requests_.clear();
+  index_albums_.clear();
+  index_next_album_ = 0;
+
+  if (index_cancelled_ || index_cursor_ >= index_artist_ids_.count()) {
+    FinishIndexLibrary();
+    return;
+  }
+
+  const QString artist_id = index_artist_ids_.at(index_cursor_);
+  const QString artist_name = index_artist_names_.at(index_cursor_);
+
+  task_manager_->SetTaskProgress(index_task_id_, index_cursor_, index_artist_ids_.count());
+  Q_EMIT SongsUpdateStatus(tr("Indexing %1 (%2/%3)...").arg(artist_name).arg(index_cursor_ + 1).arg(index_artist_ids_.count()));
+
+  const Song artist = ContainerSong(artist_id, artist_name, QString(), true);
+  auto *request = new YouTubeMusicRequest(this, network_, this);
+  index_requests_.insert(0, request);
+  QObject::connect(request, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::IndexArtistAlbumsReceived);
+  request->ProcessArtistAlbums(artist);
+
+}
+
+void YouTubeMusicService::IndexArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error) {
+
+  Q_UNUSED(id);
+
+  if (YouTubeMusicRequest *request = index_requests_.take(0)) request->deleteLater();
+
+  if (!error.isEmpty()) qLog(Warning) << "YouTubeMusic: index could not read albums:" << error;
+
+  for (const Song &album : songs) {
+    if (!album.album_id().isEmpty()) index_albums_ << album;
+  }
+
+  index_albums_total_ = index_albums_.count();
+  index_albums_done_ = 0;
+  StartNextIndexAlbum();
+
+}
+
+void YouTubeMusicService::StartNextIndexAlbum() {
+
+  if (index_cancelled_) {
+    FinishIndexLibrary();
+    return;
+  }
+
+  // Three albums in flight, like the artist walk.
+  constexpr int kMaxConcurrentAlbums = 3;
+  while (index_requests_.size() < kMaxConcurrentAlbums && index_next_album_ < index_albums_.count()) {
+    const int slot = index_next_album_++;
+    const Song album = index_albums_.at(slot);
+    auto *request = new YouTubeMusicRequest(this, network_, this);
+    index_requests_.insert(slot, request);
+    // Capture the slot: the reply has to retire *its own* request, not the lowest key.
+    QObject::connect(request, &YouTubeMusicRequest::Results, this,
+                     [this, slot](const int, const SongMap &songs, const QString &error) {
+                       IndexAlbumTracksReceived(slot, songs, error);
+                     });
+    request->ProcessAlbum(album);
+  }
+
+  if (index_requests_.isEmpty()) {
+    FinishIndexAlbum();
+  }
+
+}
+
+void YouTubeMusicService::IndexAlbumTracksReceived(const int slot, const SongMap &songs, const QString &error) {
+
+  Q_UNUSED(error);
+
+  if (YouTubeMusicRequest *request = index_requests_.take(slot)) request->deleteLater();
+
+  if (!songs.isEmpty()) {
+    SongList tracks = songs.values();
+    for (Song &track : tracks) {
+      if (track.artist().isEmpty()) track.set_artist(index_artist_names_.value(index_cursor_));
+      if (track.albumartist().isEmpty()) track.set_albumartist(track.artist());
+    }
+    // Only the artists tree stores artist -> album -> track; the albums list holds album rows.
+    artists_collection_backend_->AddOrUpdateSongsAsync(tracks);
+  }
+
+  ++index_albums_done_;
+  if (index_albums_total_ > 0) {
+    task_manager_->SetTaskProgress(index_task_id_, index_cursor_, index_artist_ids_.count());
+  }
+  StartNextIndexAlbum();
+
+}
+
+void YouTubeMusicService::FinishIndexAlbum() {
+
+  // Follow the pagination of the next artist once this one is done.
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
+  indexed.insert(index_artist_ids_.value(index_cursor_), QDateTime::currentDateTime().toString(Qt::ISODate));
+  s.setValue(YouTubeMusicSettings::kIndexedArtists, indexed);
+  s.endGroup();
+  s.sync();
+
+  qLog(Info) << "YouTubeMusic: indexed" << index_artist_names_.value(index_cursor_)
+             << "(" << index_albums_total_ << "albums )";
+
+  ++index_cursor_;
+  StartNextIndexArtist();
+
+}
+
+void YouTubeMusicService::FinishIndexLibrary(const QString &error) {
+
+  for (YouTubeMusicRequest *request : std::as_const(index_requests_)) {
+    if (request) request->deleteLater();
+  }
+  index_requests_.clear();
+
+  if (index_task_id_ >= 0) {
+    task_manager_->SetTaskFinished(index_task_id_);
+    index_task_id_ = -1;
+  }
+
+  index_artist_ids_.clear();
+  index_artist_names_.clear();
+  index_albums_.clear();
+  index_next_album_ = 0;
+
+  Q_EMIT SongsUpdateStatus(error.isEmpty() ? QString() : error);
+  qLog(Info) << "YouTubeMusic: library index finished";
+
+}
+
 void YouTubeMusicService::LoadMoreArtists() {
 
   // The request layer defaults to 20 library pages, so "more" has to start above that.

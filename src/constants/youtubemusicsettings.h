@@ -26,6 +26,10 @@ constexpr char kCookiesScript[] = "cookies_script";
 // "chrome", "firefox", "brave", "chromium", "edge", "chrome+gnomekeyring:Profile 1", ...
 constexpr char kCookiesBrowser[] = "cookies_browser";
 constexpr char kCookiesImportedAt[] = "cookies_imported_at";   // ISO date of the last import
+// artist id -> ISO date it was last walked by the indexer
+constexpr char kIndexedArtists[] = "indexed_artists";
+// how long an indexed artist is considered fresh
+constexpr int kIndexTtlDays = 7;
 constexpr char kDownloadDir[] = "download_dir";
 constexpr char kDownloadFormat[] = "download_format";
 constexpr char kDownloadEmbedThumbnail[] = "download_embed_thumbnail";

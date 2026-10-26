@@ -43,6 +43,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
       label_account_state_(new QLabel(this)),
       label_account_detail_(new QLabel(this)),
       button_sign_out_(new QPushButton(tr("Sign out"), this)),
+      button_index_library_(new QPushButton(tr("Index library"), this)),
       combobox_cookies_browser_(new QComboBox(this)),
       button_sign_in_(new QPushButton(tr("Sign in to YouTube Music..."), this)),
       button_import_cookies_(new QPushButton(tr("Import cookies now"), this)),
@@ -96,6 +97,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   layout_buttons->addWidget(button_sign_in_);
   layout_buttons->addWidget(button_import_cookies_);
   layout_buttons->addWidget(button_sign_out_);
+  layout_buttons->addWidget(button_index_library_);
   layout_buttons->addStretch();
   layout_login->addLayout(layout_buttons);
 
@@ -159,6 +161,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   QObject::connect(button_sign_in_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignIn);
   QObject::connect(button_import_cookies_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::ImportCookies);
   QObject::connect(button_sign_out_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignOut);
+  QObject::connect(button_index_library_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::IndexLibrary);
 
   Load();
 
@@ -284,5 +287,17 @@ void YouTubeMusicSettingsPage::SignOut() {
   service_->SignOut();
   UpdateLoginState();
   label_login_state_->setText(tr("Signed out. Search and playback still work."));
+
+}
+
+void YouTubeMusicSettingsPage::IndexLibrary() {
+
+  if (!service_) return;
+
+  // Walks every artist whose index entry is stale; progress shows in the status bar and the
+  // task manager, and the run is resumable because each artist is stamped when it finishes.
+  service_->IndexLibrary();
+  label_login_state_->setText(tr("Indexing the library in the background - artists already indexed "
+                                 "are skipped."));
 
 }
