@@ -1108,6 +1108,20 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     for (const QString &name : std::as_const(names)) {
       if (!split_re.match(name).hasMatch()) continue;
       if (subscribed.contains(name.toLower())) continue;   // itself subscribed - leave alone
+      // Prefer the longest subscribed name contained in this one: splitting would break a
+      // nested collaboration ("Becky Hill & Chase & Status" -> "Chase", "Status") and the row
+      // would then be dropped instead of folded.
+      QString best;
+      for (auto sub = subscribed.cbegin(); sub != subscribed.cend(); ++sub) {
+        if (sub.key().length() < 3) continue;
+        if (!name.contains(sub.key(), Qt::CaseInsensitive)) continue;
+        if (best.length() < sub.key().length()) best = sub.key();
+      }
+      if (!best.isEmpty()) {
+        merges.insert(name, subscribed.value(best));
+        continue;
+      }
+
       const QStringList parts = name.split(split_re, Qt::SkipEmptyParts);
       for (const QString &part : parts) {
         const QString candidate = part.trimmed();
@@ -1121,7 +1135,6 @@ void YouTubeMusicService::MergeCollaborationArtists() {
 
   if (merges.isEmpty()) {
     qLog(Info) << "YouTubeMusic: no collaboration artists to fold";
-    return;
   }
 
   QMutexLocker locker(database_->Mutex());
@@ -1135,6 +1148,46 @@ void YouTubeMusicService::MergeCollaborationArtists() {
   }
 
   qLog(Info) << "YouTubeMusic: folded" << merges.count() << "collaboration artist(s) into subscribed artists";
+
+  // Strict: the artist browser shows the subscription list, so rows that ended up under an
+  // artist the user does not follow (album credits such as "Samantha Machado" on a compilation)
+  // are dropped from the tree. They stay reachable from the Albums and Songs tabs.
+  QHash<QString, QString> subscribed_after;
+  {
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs "
+                             "WHERE coalesce(album_id, '') = '' AND coalesce(song_id, '') = '' AND artist <> ''"));
+    if (!q.Exec()) {
+      database_->ReportErrors(q);
+      return;
+    }
+    while (q.next()) subscribed_after.insert(q.value(0).toString(), q.value(0).toString());
+  }
+
+  SqlQuery stray(db);
+  stray.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs "
+                               "WHERE artist <> '' AND artist NOT IN (SELECT artist FROM youtubemusic_artists_songs "
+                               "WHERE coalesce(album_id, '') = '' AND coalesce(song_id, '') = '' AND artist <> '')"));
+  if (!stray.Exec()) {
+    database_->ReportErrors(stray);
+    return;
+  }
+  QStringList strays;
+  while (stray.next()) strays << stray.value(0).toString();
+
+  for (const QString &artist : std::as_const(strays)) {
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE artist = ?"));
+    q.addBindValue(artist);
+    if (!q.Exec()) {
+      database_->ReportErrors(q);
+      return;
+    }
+  }
+
+  if (!strays.isEmpty()) {
+    qLog(Info) << "YouTubeMusic: removed" << strays.count() << "artist(s) that are not subscribed:" << strays.join(u", "_s);
+  }
 
 }
 
