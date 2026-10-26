@@ -44,6 +44,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
       label_account_detail_(new QLabel(this)),
       button_sign_out_(new QPushButton(tr("Sign out"), this)),
       button_index_library_(new QPushButton(tr("Index library"), this)),
+      checkbox_prefetch_index_(new QCheckBox(tr("Keep indexing in the background (one artist at a time, most recently browsed first)"), this)),
       combobox_cookies_browser_(new QComboBox(this)),
       button_sign_in_(new QPushButton(tr("Sign in to YouTube Music..."), this)),
       button_import_cookies_(new QPushButton(tr("Import cookies now"), this)),
@@ -115,6 +116,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   layout_login->addWidget(label_login_state_);
 
   layout_login->addWidget(checkbox_auto_refresh_cookies_);
+  layout_login->addWidget(checkbox_prefetch_index_);
 
   lineedit_cookies_script_->setPlaceholderText(QStringLiteral("%1/Projects/scripts/strawberry-ytm-cookies.py").arg(QDir::homePath()));
   lineedit_cookies_script_->setToolTip(tr("Helper that reads the cookies out of the browser and updates Strawberry's config. "
@@ -178,6 +180,7 @@ void YouTubeMusicSettingsPage::Load() {
   spinbox_search_limit_->setValue(s.value(QLatin1String(YouTubeMusicSettings::kSearchLimit), 50).toInt());
   checkbox_remove_remastered_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), true).toBool());
   checkbox_auto_refresh_cookies_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), true).toBool());
+  checkbox_prefetch_index_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), true).toBool());
   const QString browser = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
   const int browser_index = combobox_cookies_browser_->findData(browser);
   if (browser_index >= 0) combobox_cookies_browser_->setCurrentIndex(browser_index);
@@ -205,6 +208,7 @@ void YouTubeMusicSettingsPage::Save() {
   s.setValue(QLatin1String(YouTubeMusicSettings::kSearchLimit), spinbox_search_limit_->value());
   s.setValue(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), checkbox_remove_remastered_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), checkbox_auto_refresh_cookies_->isChecked());
+  s.setValue(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), checkbox_prefetch_index_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), combobox_cookies_browser_->currentData().toString());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadDir), lineedit_download_dir_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadFormat), combobox_download_format_->currentData().toString());

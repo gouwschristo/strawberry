@@ -30,6 +30,10 @@ constexpr char kCookiesImportedAt[] = "cookies_imported_at";   // ISO date of th
 constexpr char kIndexedArtists[] = "indexed_artists";
 // how long an indexed artist is considered fresh
 constexpr int kIndexTtlDays = 7;
+// artists the user expanded, most recent first - the prefetcher takes these before the rest
+constexpr char kRecentArtists[] = "recent_artists";
+// index artists in the background while the app is idle
+constexpr char kPrefetchIndex[] = "prefetch_index";
 constexpr char kDownloadDir[] = "download_dir";
 constexpr char kDownloadFormat[] = "download_format";
 constexpr char kDownloadEmbedThumbnail[] = "download_embed_thumbnail";

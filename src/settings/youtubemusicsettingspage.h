@@ -52,6 +52,7 @@ class YouTubeMusicSettingsPage : public SettingsPage {
   QLabel *label_account_detail_;
   QPushButton *button_sign_out_;
   QPushButton *button_index_library_;
+  QCheckBox *checkbox_prefetch_index_;
   QComboBox *combobox_cookies_browser_;
   QPushButton *button_sign_in_;
   QPushButton *button_import_cookies_;

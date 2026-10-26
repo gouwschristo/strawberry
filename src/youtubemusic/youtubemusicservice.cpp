@@ -186,6 +186,14 @@ void YouTubeMusicService::ReloadSettings() {
   ytdlp_path_ = s.value(QLatin1String(YouTubeMusicSettings::kYtdlpPath), u"yt-dlp"_s).toString().trimmed();
   search_limit_ = s.value(QLatin1String(YouTubeMusicSettings::kSearchLimit), 50).toInt();
   remove_remastered_ = s.value(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), true).toBool();
+  prefetch_ = s.value(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), true).toBool();
+  if (!prefetch_timer_) {
+    prefetch_timer_ = new QTimer(this);
+    prefetch_timer_->setInterval(3 * 60 * 1000);
+    QObject::connect(prefetch_timer_, &QTimer::timeout, this, &YouTubeMusicService::PrefetchNextArtist);
+  }
+  if (prefetch_) prefetch_timer_->start(); else prefetch_timer_->stop();
+
   auto_refresh_cookies_ = s.value(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), true).toBool();
   download_dir_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadDir),
                           QStringLiteral("%1/Music/YouTubeMusic").arg(QDir::homePath())).toString();
@@ -651,11 +659,32 @@ void YouTubeMusicService::IndexLibrary(const int max_artists) {
 
   if (max_artists > 0 && stale.count() > max_artists) stale = stale.mid(0, max_artists);
 
-  index_artist_ids_.clear();
-  index_artist_names_.clear();
+  QStringList ids;
+  QStringList names;
   for (const Candidate &candidate : std::as_const(stale)) {
-    index_artist_ids_ << candidate.id;
-    index_artist_names_ << candidate.name;
+    ids << candidate.id;
+    names << candidate.name;
+  }
+
+  BeginIndex(ids, names);
+
+}
+
+void YouTubeMusicService::BeginIndex(const QStringList &artist_ids, const QStringList &artist_names) {
+
+  index_artist_ids_ = artist_ids;
+  index_artist_names_ = artist_names;
+
+  // The prefetcher only knows the id; without the name, tracks that arrive without an artist
+  // would be stored with an empty one.
+  for (int i = 0; i < index_artist_names_.count(); ++i) {
+    if (!index_artist_names_.at(i).isEmpty()) continue;
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT artist FROM youtubemusic_artists_songs WHERE artist_id = ? AND artist <> '' LIMIT 1"));
+    q.addBindValue(index_artist_ids_.value(i));
+    if (q.Exec() && q.next()) index_artist_names_[i] = q.value(0).toString();
   }
   index_cursor_ = 0;
   index_cancelled_ = false;
@@ -669,6 +698,77 @@ void YouTubeMusicService::IndexLibrary(const int max_artists) {
   index_task_id_ = task_manager_->StartTask(tr("Indexing YouTube Music library"));
   qLog(Info) << "YouTubeMusic: indexing" << index_artist_ids_.count() << "artist(s)";
   StartNextIndexArtist();
+
+}
+
+void YouTubeMusicService::PrefetchNextArtist() {
+
+  if (!prefetch_ || index_task_id_ >= 0) return;
+
+  // Only when nothing else is going on: no running downloads.
+  for (const DownloadEntry &entry : std::as_const(download_entries_)) {
+    if (entry.state == DownloadEntry::State::Queued || entry.state == DownloadEntry::State::Downloading) return;
+  }
+
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  const QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
+  const QStringList recent = s.value(YouTubeMusicSettings::kRecentArtists).toStringList();
+  s.endGroup();
+
+  const QDateTime now = QDateTime::currentDateTime();
+  auto is_stale = [&indexed, &now](const QString &id) {
+    const QDateTime stamp = QDateTime::fromString(indexed.value(id).toString(), Qt::ISODate);
+    return !stamp.isValid() || stamp.secsTo(now) >= YouTubeMusicSettings::kIndexTtlDays * 24 * 60 * 60;
+  };
+
+  // Preferred: what the user just looked at.
+  for (const QString &id : recent) {
+    if (!is_stale(id)) continue;
+    qLog(Info) << "YouTubeMusic: prefetching recently browsed artist" << id;
+    BeginIndex({id}, {QString()});
+    return;
+  }
+
+  // Otherwise the oldest entry, so a background run eventually covers the library.
+  QString oldest_id;
+  QString oldest_stamp;
+  QMutexLocker locker(database_->Mutex());
+  QSqlDatabase db = database_->Connect();
+  SqlQuery q(db);
+  q.prepare(QStringLiteral("SELECT DISTINCT artist_id, artist FROM youtubemusic_artists_songs WHERE artist_id <> ''"));
+  if (!q.Exec()) return;
+  while (q.next()) {
+    const QString id = q.value(0).toString();
+    if (!is_stale(id)) continue;
+    const QString stamp = indexed.value(id).toString();
+    if (oldest_id.isEmpty() || stamp < oldest_stamp) {
+      oldest_id = id;
+      oldest_stamp = stamp;
+    }
+  }
+  locker.unlock();
+
+  if (oldest_id.isEmpty()) return;
+
+  qLog(Info) << "YouTubeMusic: prefetching artist" << oldest_id;
+  BeginIndex({oldest_id}, {QString()});
+
+}
+
+void YouTubeMusicService::RememberBrowsedArtist(const Song &artist) {
+
+  if (artist.artist_id().isEmpty()) return;
+
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  QStringList recent = s.value(YouTubeMusicSettings::kRecentArtists).toStringList();
+  recent.removeAll(artist.artist_id());
+  recent.prepend(artist.artist_id());
+  while (recent.count() > 20) recent.removeLast();
+  s.setValue(YouTubeMusicSettings::kRecentArtists, recent);
+  s.endGroup();
+  s.sync();
 
 }
 
@@ -1321,6 +1421,8 @@ void YouTubeMusicService::ExpandArtistRow(const Song &artist) {
   if (artist.artist_id().isEmpty()) return;
   if (expanded_artists_.contains(artist.artist_id())) return;
   expanded_artists_.insert(artist.artist_id());
+
+  RememberBrowsedArtist(artist);
 
   Expansion expansion;
   expansion.song = artist;

@@ -166,6 +166,8 @@ class YouTubeMusicService : public StreamingService {
   // and tracks, so expanding an artist later is a database read instead of a network walk.
   void IndexLibrary(const int max_artists = -1);
   void CancelIndexLibrary();
+  // One stale artist, most recently browsed first. Called from a timer while idle.
+  void PrefetchNextArtist();
   bool index_running() const { return index_task_id_ >= 0; }
   void GetAlbumTracks(const Song &album) override;
   void GetArtistTracks(const Song &artist) override;
@@ -214,6 +216,8 @@ class YouTubeMusicService : public StreamingService {
   void IndexAlbumTracksReceived(const int slot, const SongMap &songs, const QString &error);
   void FinishIndexAlbum();
   void FinishIndexLibrary(const QString &error = QString());
+  void BeginIndex(const QStringList &artist_ids, const QStringList &artist_names);
+  void RememberBrowsedArtist(const Song &artist);
 
   const SharedPtr<TaskManager> task_manager_;
   const SharedPtr<NetworkAccessManager> network_;
@@ -305,6 +309,8 @@ class YouTubeMusicService : public StreamingService {
   int index_albums_done_ = 0;
   int index_task_id_ = -1;
   bool index_cancelled_ = false;
+  bool prefetch_ = true;
+  QTimer *prefetch_timer_ = nullptr;
   QHash<int, YouTubeMusicRequest *> index_requests_;   // parented, deleteLater'd
   QVector<SongList> artist_walk_results_;
   int artist_walk_next_ = 0;
