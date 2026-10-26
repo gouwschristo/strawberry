@@ -3732,6 +3732,23 @@ void MainWindow::PlaylistDownload() {
 
 void MainWindow::DownloadStreamingSongs(const SongList &songs) {
 
+  // An artist row means the whole discography, which can be hundreds of files: ask first.
+  // Albums and single tracks go straight through.
+  QString artist;
+  for (const Song &song : songs) {
+    if (song.album_id().isEmpty() && !song.artist_id().isEmpty()) {
+      artist = song.artist().isEmpty() ? song.artist_id() : song.artist();
+      break;
+    }
+  }
+  if (!artist.isEmpty()) {
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this, tr("Download artist"),
+        tr("Download every album of \"%1\"?\n\nThis can queue a large number of files.").arg(artist),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (answer != QMessageBox::Yes) return;
+  }
+
   // Used by the queue view, which hands over its own selection.
   QMap<int, SongList> songs_by_source;
   for (const Song &song : songs) {
