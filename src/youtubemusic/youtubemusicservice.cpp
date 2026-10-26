@@ -1463,21 +1463,9 @@ void YouTubeMusicService::ExpandedAlbumResultsReceived(const int id, const SongM
           track.set_albumartist(parent_artist);
         }
       }
-      // A one-track album whose track carries the album's name is the same thing twice:
-      // drop the album level so the track itself hangs under the artist. The album id is
-      // kept, so downloads still resolve the right album.
-      const QString album_name = expand_album_context_.album().trimmed();
-      if (tracks.count() == 1 && !album_name.isEmpty() &&
-          tracks.first().title().trimmed().compare(album_name, Qt::CaseInsensitive) == 0) {
-        Song single = tracks.first();
-        single.set_album(QString());
-        single.set_albumsort(QString());
-        tracks = SongList() << single;
-        // The row that described the album would otherwise leave an empty album container
-        // in the tree, so drop it as well.
-        const QUrl album_url = expand_album_context_.url();
-        if (album_url.isValid()) artists_collection_backend_->DeleteSongsByUrlsAsync({album_url});
-      }
+      // Single-track albums used to be flattened here (album level dropped and the album's
+      // descriptor row deleted), which made the album *and* its track disappear from where the
+      // user was looking - 950 albums in this library matched. Rows stay as they are now.
       artists_collection_backend_->AddOrUpdateSongsAsync(tracks);
     }
     else {
