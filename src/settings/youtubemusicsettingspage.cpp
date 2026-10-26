@@ -54,6 +54,8 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
       combobox_download_format_(new QComboBox(this)),
       checkbox_embed_thumbnail_(new QCheckBox(tr("Embed cover art in downloaded files"), this)) {
 
+  // SettingsDialog::AddPage() shows windowTitle() next to windowIcon() in the sidebar.
+  setWindowTitle(tr("YouTube Music"));
   setWindowIcon(IconLoader::Load(u"youtubemusic"_s, true, 0, 32));
 
   QVBoxLayout *layout = new QVBoxLayout(this);
