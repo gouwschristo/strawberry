@@ -211,6 +211,16 @@ QString VideoId(const QJsonValue &item) {
     if (!video_id.isEmpty()) return video_id;
   }
 
+  // Album and playlist rows served in the "playlist" shape carry the id only in
+  // playlistItemData (navigationEndpoint is null). Those rows were skipped, which left whole
+  // singles and community albums without any tracks.
+  QList<QJsonObject> playlist_items;
+  CollectObjectsWithKey(item, u"playlistItemData"_s, playlist_items);
+  for (const QJsonObject &playlist_item : playlist_items) {
+    const QString video_id = playlist_item["videoId"_L1].toString();
+    if (!video_id.isEmpty()) return video_id;
+  }
+
   return QString();
 
 }

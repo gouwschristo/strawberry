@@ -682,7 +682,9 @@ void YouTubeMusicService::BeginIndex(const QStringList &artist_ids, const QStrin
     QMutexLocker locker(database_->Mutex());
     QSqlDatabase db = database_->Connect();
     SqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT artist FROM youtubemusic_artists_songs WHERE artist_id = ? AND artist <> '' LIMIT 1"));
+    q.prepare(QStringLiteral("SELECT artist FROM youtubemusic_artists_songs "
+                             "WHERE artist_id = ? AND artist <> '' AND artist NOT LIKE '%-MPREb%' AND artist NOT LIKE '%-MPLAU%' "
+                             "ORDER BY length(artist) LIMIT 1"));
     q.addBindValue(index_artist_ids_.value(i));
     if (q.Exec() && q.next()) index_artist_names_[i] = q.value(0).toString();
   }
@@ -1449,7 +1451,12 @@ void YouTubeMusicService::ExpandedAlbumResultsReceived(const int id, const SongM
     if (expand_into_artists_view_) {
       // Keep the artist name of the parent row so the tracks group under it.
       SongList tracks = songs.values();
-      const QString parent_artist = expand_album_context_.artist();
+      QString parent_artist = expand_album_context_.artist();
+      // The parent name can be the model's composite container key ("Stromae-QUE CE SOIT
+      // CLAIR-MPREb_..."): the artist is its first segment, never the whole string.
+      if (parent_artist.contains(u"-MPREb"_s) || parent_artist.contains(u"-MPLAU"_s)) {
+        parent_artist = parent_artist.section(u'-', 0, 0).trimmed();
+      }
       if (!parent_artist.isEmpty()) {
         for (Song &track : tracks) {
           track.set_artist(parent_artist);
