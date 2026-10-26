@@ -92,6 +92,18 @@ class YouTubeMusicService : public StreamingService {
 
   QByteArray authorization_header() const;
   QString download_dir() const { return download_dir_; }
+  // What the settings page shows instead of the raw cookie: whether there is a session,
+  // what is in the library and where the session came from.
+  struct SessionInfo {
+    bool signed_in = false;
+    int songs = 0;
+    int artists = 0;
+    int albums = 0;
+    QString imported_at;
+    QString browser;
+  };
+  SessionInfo session_info() const;
+
   const QList<DownloadEntry> &download_entries() const { return download_entries_; }
   void CancelCurrentDownload();
   // Collapses artist names that differ only by case, so one artist is not split into
@@ -109,6 +121,8 @@ class YouTubeMusicService : public StreamingService {
   // chromium, edge, firefox, opera, safari, vivaldi, whale - optionally +KEYRING and
   // :PROFILE) and stores them. Returns true when the stored cookie changed.
   bool ImportCookiesFromBrowser(const QString &browser, QString *error = nullptr);
+  // Forgets the stored session.
+  void SignOut();
 
 
   uint GetStreamURL(const QUrl &url, QString &error);

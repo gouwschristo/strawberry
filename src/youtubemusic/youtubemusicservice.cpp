@@ -201,6 +201,47 @@ bool YouTubeMusicService::authenticated() const {
 
 }
 
+YouTubeMusicService::SessionInfo YouTubeMusicService::session_info() const {
+
+  SessionInfo info;
+  info.signed_in = !cookie_.isEmpty();
+
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  info.imported_at = s.value(YouTubeMusicSettings::kCookiesImportedAt).toString();
+  info.browser = s.value(YouTubeMusicSettings::kCookiesBrowser).toString();
+  s.endGroup();
+
+  if (database_) {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    for (const auto &entry : {std::make_pair(u"youtubemusic_songs"_s, &info.songs),
+                              std::make_pair(u"youtubemusic_artists_songs"_s, &info.artists),
+                              std::make_pair(u"youtubemusic_albums_songs"_s, &info.albums)}) {
+      SqlQuery q(db);
+      q.prepare(QStringLiteral("SELECT count(*) FROM %1").arg(entry.first));
+      if (q.Exec() && q.next()) *entry.second = q.value(0).toInt();
+    }
+  }
+
+  return info;
+
+}
+
+void YouTubeMusicService::SignOut() {
+
+  cookie_.clear();
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  s.setValue(YouTubeMusicSettings::kCookie, QString());
+  s.remove(YouTubeMusicSettings::kCookiesImportedAt);
+  s.endGroup();
+  s.sync();
+
+  qLog(Info) << "YouTubeMusic: signed out";
+
+}
+
 bool YouTubeMusicService::ImportCookiesFromBrowser(const QString &browser, QString *error) {
 
   const QString ytdlp = ytdlp_path_.isEmpty() ? u"yt-dlp"_s : ytdlp_path_;

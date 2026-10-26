@@ -40,7 +40,9 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
     : SettingsPage(dialog, parent),
       service_(service),
       checkbox_enabled_(new QCheckBox(tr("Enable YouTube Music"), this)),
-      textedit_cookie_(new QPlainTextEdit(this)),
+      label_account_state_(new QLabel(this)),
+      label_account_detail_(new QLabel(this)),
+      button_sign_out_(new QPushButton(tr("Sign out"), this)),
       combobox_cookies_browser_(new QComboBox(this)),
       button_sign_in_(new QPushButton(tr("Sign in to YouTube Music..."), this)),
       button_import_cookies_(new QPushButton(tr("Import cookies now"), this)),
@@ -93,12 +95,19 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   QHBoxLayout *layout_buttons = new QHBoxLayout();
   layout_buttons->addWidget(button_sign_in_);
   layout_buttons->addWidget(button_import_cookies_);
+  layout_buttons->addWidget(button_sign_out_);
   layout_buttons->addStretch();
   layout_login->addLayout(layout_buttons);
 
-  textedit_cookie_->setPlaceholderText(u"SAPISID=...; __Secure-3PAPISID=..."_s);
-  textedit_cookie_->setFixedHeight(70);
-  layout_login->addWidget(textedit_cookie_);
+  label_account_state_->setWordWrap(true);
+  QFont state_font = label_account_state_->font();
+  state_font.setPointSizeF(state_font.pointSizeF() * 1.15);
+  state_font.setBold(true);
+  label_account_state_->setFont(state_font);
+  layout_login->addWidget(label_account_state_);
+
+  label_account_detail_->setWordWrap(true);
+  layout_login->addWidget(label_account_detail_);
 
   label_login_state_->setWordWrap(true);
   layout_login->addWidget(label_login_state_);
@@ -147,9 +156,9 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   layout->addWidget(group_downloads);
   layout->addStretch();
 
-  QObject::connect(textedit_cookie_, &QPlainTextEdit::textChanged, this, &YouTubeMusicSettingsPage::CookieChanged);
   QObject::connect(button_sign_in_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignIn);
   QObject::connect(button_import_cookies_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::ImportCookies);
+  QObject::connect(button_sign_out_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignOut);
 
   Load();
 
@@ -162,7 +171,6 @@ void YouTubeMusicSettingsPage::Load() {
   Settings s;
   s.beginGroup(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
   checkbox_enabled_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kEnabled), true).toBool());
-  textedit_cookie_->setPlainText(s.value(QLatin1String(YouTubeMusicSettings::kCookie)).toString());
   lineedit_ytdlp_->setText(s.value(QLatin1String(YouTubeMusicSettings::kYtdlpPath), u"yt-dlp"_s).toString());
   spinbox_search_limit_->setValue(s.value(QLatin1String(YouTubeMusicSettings::kSearchLimit), 50).toInt());
   checkbox_remove_remastered_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), true).toBool());
@@ -190,7 +198,6 @@ void YouTubeMusicSettingsPage::Save() {
   Settings s;
   s.beginGroup(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
   s.setValue(QLatin1String(YouTubeMusicSettings::kEnabled), checkbox_enabled_->isChecked());
-  s.setValue(QLatin1String(YouTubeMusicSettings::kCookie), textedit_cookie_->toPlainText().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kYtdlpPath), lineedit_ytdlp_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kSearchLimit), spinbox_search_limit_->value());
   s.setValue(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), checkbox_remove_remastered_->isChecked());
@@ -208,27 +215,30 @@ void YouTubeMusicSettingsPage::Save() {
 
 }
 
-void YouTubeMusicSettingsPage::CookieChanged() {
-
-  UpdateLoginState();
-
-}
-
 void YouTubeMusicSettingsPage::UpdateLoginState() {
 
-  const QString cookie = textedit_cookie_->toPlainText().trimmed();
+  if (!service_) return;
 
-  if (cookie.isEmpty()) {
-    label_login_state_->setText(tr("Not logged in. Only search and playback are available."));
+  const YouTubeMusicService::SessionInfo info = service_->session_info();
+
+  if (!info.signed_in) {
+    label_account_state_->setText(tr("Not signed in"));
+    label_account_detail_->setText(tr("Search and playback work without a session. Sign in to see your library, "
+                                      "liked artists and liked albums."));
+    button_sign_out_->setVisible(false);
     return;
   }
 
-  if (!cookie.contains("SAPISID"_L1)) {
-    label_login_state_->setText(tr("The cookie is missing a SAPISID value, your library won't be accessible."));
-    return;
+  label_account_state_->setText(tr("Signed in"));
+  QString detail = tr("Library: %1 songs, %2 artists, %3 albums.")
+                     .arg(info.songs).arg(info.artists).arg(info.albums);
+  if (!info.imported_at.isEmpty()) {
+    detail += u" "_s + (info.browser.isEmpty()
+                            ? tr("Session imported %1.").arg(info.imported_at)
+                            : tr("Session imported %1 from %2.").arg(info.imported_at, info.browser));
   }
-
-  label_login_state_->setText(tr("Cookies set. Your library will be loaded when the settings are saved."));
+  label_account_detail_->setText(detail);
+  button_sign_out_->setVisible(true);
 
 }
 
@@ -257,8 +267,22 @@ void YouTubeMusicSettingsPage::ImportCookies() {
   button_import_cookies_->setEnabled(true);
   button_import_cookies_->setText(old_text);
 
-  if (changed) textedit_cookie_->setPlainText(service_->cookie());
-  label_login_state_->setText(changed ? tr("Cookies imported from %1.").arg(browser)
-                                      : (error.isEmpty() ? tr("The cookies did not change.") : error));
+  UpdateLoginState();
+  if (!changed) {
+    label_login_state_->setText(error.isEmpty() ? tr("The cookies did not change.") : error);
+  }
+  else {
+    label_login_state_->clear();
+  }
+
+}
+
+void YouTubeMusicSettingsPage::SignOut() {
+
+  if (!service_) return;
+
+  service_->SignOut();
+  UpdateLoginState();
+  label_login_state_->setText(tr("Signed out. Search and playback still work."));
 
 }
