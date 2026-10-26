@@ -3654,7 +3654,7 @@ void MainWindow::ApplyStreamMetadata(const Song &song) {
 
   // Rows created from a bare url have no title until the stream is resolved.
   for (int row = 0; row < playlist->rowCount(); ++row) {
-    PlaylistItemPtr item = playlist->item_at(row);
+    const PlaylistItemPtr item = playlist->item_at(row);
     if (!item) continue;
     const Song existing = item->EffectiveMetadata();
     if (existing.url() != song.url()) continue;
@@ -3671,10 +3671,17 @@ void MainWindow::ApplyStreamMetadata(const Song &song) {
       merged.set_albumartist(song.artist());
     }
     if (!song.album().isEmpty()) merged.set_album(song.album());
-    if (song.year() > 0) merged.set_year(song.year());
+    // yt-dlp reports the *upload* year for a video, which is often a re-upload: never let it
+    // replace the year the album page gave us.
+    if (song.year() > 0 && merged.year() <= 0) merged.set_year(song.year());
 
     qLog(Info) << "Playlist row" << row << "filled in from the stream:" << merged.artist() << "-" << merged.title();
-    playlist->UpdateItemMetadata(row, item, merged, true);
+
+    // "false" stores this as the item's real metadata (a stream overlay, as before, is never
+    // saved); the explicit save makes the row keep its title across restarts. UpdateItems() is
+    // not an option here - it matches every row with the same url, not the row we picked.
+    playlist->UpdateItemMetadata(row, item, merged, false);
+    playlist->ScheduleSaveAsync();
     return;
   }
 
