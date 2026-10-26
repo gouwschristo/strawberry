@@ -123,6 +123,8 @@ class YouTubeMusicService : public StreamingService {
   bool ImportCookiesFromBrowser(const QString &browser, QString *error = nullptr);
   // Forgets the stored session.
   void SignOut();
+  // Re-imports the browser cookies shortly after start so the first request does not stall.
+  void RefreshCookiesInBackground();
 
 
   uint GetStreamURL(const QUrl &url, QString &error);

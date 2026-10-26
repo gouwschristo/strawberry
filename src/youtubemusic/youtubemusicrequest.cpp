@@ -542,6 +542,9 @@ void YouTubeMusicRequest::ReplyFinished() {
   const bool limit_reached = !is_library && songs_.count() >= service_->search_limit();
 
   if (paginate && !continuation.isEmpty() && pages_ < max_pages && !limit_reached) {
+    // Show what this page brought before asking for the next one: a library refresh pages
+    // for ~10 seconds and used to leave the tree empty for all of it.
+    EmitNewResults();
     RequestContinuation(continuation);
     return;
   }
@@ -780,6 +783,21 @@ void YouTubeMusicRequest::RequestContinuation(const QString &token) {
 
   const bool is_search = type_ == Type::SearchArtists || type_ == Type::SearchAlbums || type_ == Type::SearchSongs;
   Send(is_search ? u"/youtubei/v1/search"_s : u"/youtubei/v1/browse"_s, body);
+
+}
+
+void YouTubeMusicRequest::EmitNewResults() {
+
+  if (songs_.isEmpty()) return;
+
+  SongMap fresh;
+  for (auto it = songs_.cbegin(); it != songs_.cend(); ++it) {
+    if (emitted_keys_.contains(it.key())) continue;
+    emitted_keys_.insert(it.key());
+    fresh.insert(it.key(), it.value());
+  }
+
+  if (!fresh.isEmpty()) Q_EMIT PageReady(search_id_, fresh);
 
 }
 

@@ -153,6 +153,11 @@ YouTubeMusicService::YouTubeMusicService(const SharedPtr<TaskManager> task_manag
   // Self-healing: collapse artist names that only differ by capitalisation.
   NormalizeArtistNames();
 
+  // YouTube rotates the session cookies hourly, and importing them takes a few seconds
+  // (yt-dlp reads the browser store). Do that in the background shortly after start instead
+  // of on the first request that happens to need it.
+  QMetaObject::invokeMethod(this, &YouTubeMusicService::RefreshCookiesInBackground, Qt::QueuedConnection);
+
 
 
 
@@ -198,6 +203,28 @@ void YouTubeMusicService::ReloadSettings() {
 bool YouTubeMusicService::authenticated() const {
 
   return !cookie_.isEmpty();
+
+}
+
+void YouTubeMusicService::RefreshCookiesInBackground() {
+
+  if (!auto_refresh_cookies_) return;
+
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  const QString imported_at = s.value(YouTubeMusicSettings::kCookiesImportedAt).toString();
+  s.endGroup();
+
+  const QDateTime imported = QDateTime::fromString(imported_at, Qt::ISODate);
+  if (imported.isValid() && imported.secsTo(QDateTime::currentDateTime()) < 30 * 60) {
+    qLog(Debug) << "YouTubeMusic: cookies are fresh, skipping the background import";
+    return;
+  }
+
+  qLog(Info) << "YouTubeMusic: refreshing cookies in the background";
+  if (RefreshCookies()) {
+    qLog(Info) << "YouTubeMusic: background cookie refresh done";
+  }
 
 }
 
@@ -537,6 +564,9 @@ void YouTubeMusicService::GetArtists() {
   artists_request_.reset(new YouTubeMusicRequest(this, network_, this));
   if (page_budget_ > 0) (*artists_request_).set_page_budget(page_budget_);
   QObject::connect(&*artists_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistsResultsReceived);
+  QObject::connect(&*artists_request_, &YouTubeMusicRequest::PageReady, this, [this](const int, const SongMap &songs) {
+    if (!songs.isEmpty()) Q_EMIT ArtistsResults(songs, QString());
+  });
   QObject::connect(&*artists_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::ArtistsUpdateStatusReceived);
 
   artists_request_->Process(YouTubeMusicRequest::Type::LibraryArtists);
@@ -553,6 +583,9 @@ void YouTubeMusicService::GetAlbums() {
   albums_request_.reset(new YouTubeMusicRequest(this, network_, this));
   if (page_budget_ > 0) (*albums_request_).set_page_budget(page_budget_);
   QObject::connect(&*albums_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::AlbumsResultsReceived);
+  QObject::connect(&*albums_request_, &YouTubeMusicRequest::PageReady, this, [this](const int, const SongMap &songs) {
+    if (!songs.isEmpty()) Q_EMIT AlbumsResults(songs, QString());
+  });
   QObject::connect(&*albums_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::AlbumsUpdateStatusReceived);
 
   albums_request_->Process(YouTubeMusicRequest::Type::LibraryAlbums);
@@ -569,6 +602,9 @@ void YouTubeMusicService::GetSongs() {
   songs_request_.reset(new YouTubeMusicRequest(this, network_, this));
   if (page_budget_ > 0) (*songs_request_).set_page_budget(page_budget_);
   QObject::connect(&*songs_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::SongsResultsReceived);
+  QObject::connect(&*songs_request_, &YouTubeMusicRequest::PageReady, this, [this](const int, const SongMap &songs) {
+    if (!songs.isEmpty()) Q_EMIT SongsResults(songs, QString());
+  });
   QObject::connect(&*songs_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::SongsUpdateStatusReceived);
 
   songs_request_->Process(YouTubeMusicRequest::Type::LibrarySongs);

@@ -51,6 +51,9 @@ class YouTubeMusicRequest : public YouTubeMusicBaseRequest {
 
  Q_SIGNALS:
   void Results(const int id, const SongMap &songs, const QString &error);
+  // Rows of one intermediate page, so a paginated list fills while it loads. Emitted from
+  // inside the request, so consumers must not delete the request on it.
+  void PageReady(const int id, const SongMap &songs);
   void UpdateStatus(const QString &text);
 
  private Q_SLOTS:
@@ -62,6 +65,10 @@ class YouTubeMusicRequest : public YouTubeMusicBaseRequest {
   void Send(const QString &endpoint, const QJsonObject &body);
   QString FindContinuation(const QJsonObject &json_object) const;
   void EmitResults();
+  // Emits only the rows parsed since the last emit, so a paginated list fills while it loads
+  // instead of appearing all at once when the last page arrives.
+  void EmitNewResults();
+  QSet<QString> emitted_keys_;
   QString ParseTitle(const QJsonObject &item) const;
   Song ParseSongItem(const QJsonObject &item) const;
   Song ParseArtistItem(const QJsonObject &item) const;
