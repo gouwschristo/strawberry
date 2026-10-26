@@ -467,6 +467,7 @@ void StreamingTabsView::ResolveOrEmitSongs(const SongList &songs, const TracksAc
       // Container row: the tracks arrive asynchronously.
       if (!service_->supports_album_tracks()) continue;
       tracks_action_ = action;
+      tracks_action_pending_ = true;
       if (!song.album_id().isEmpty()) service_->GetAlbumTracks(song);
       else service_->GetAllArtistTracks(song);
     }
@@ -515,6 +516,12 @@ void StreamingTabsView::ResolveOrEmitSongs(const SongList &songs, const TracksAc
 }
 
 void StreamingTabsView::AlbumTracksReceived(const SongList &songs, const QString &error) {
+
+  if (!tracks_action_pending_) {
+    if (!songs.isEmpty()) qLog(Info) << "YouTubeMusic: ignoring" << songs.count() << "track(s) nobody asked for";
+    return;
+  }
+  tracks_action_pending_ = false;
 
   if (songs.isEmpty()) {
     if (!error.isEmpty()) Q_EMIT OpenSettingsDialog(service_->source());

@@ -91,6 +91,9 @@ class StreamingTabsView : public QWidget {
 
   const SharedPtr<StreamingService> service_;
   TracksAction tracks_action_;
+  // Tracks can arrive from a fetch nothing asked for (an artist walk started elsewhere);
+  // only apply them when a playlist action is actually waiting for them.
+  bool tracks_action_pending_ = false;
   void ResolveOrEmitSongs(const SongList &songs, const TracksAction action);
   QString settings_group_;
   Ui_StreamingTabsView *ui_;
