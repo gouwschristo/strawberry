@@ -1189,6 +1189,21 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     qLog(Info) << "YouTubeMusic: removed" << strays.count() << "artist(s) that are not subscribed:" << strays.join(u", "_s);
   }
 
+  // An album row whose pages never yielded a track opens to nothing: drop it from the tree.
+  // If a later walk finds tracks for it, the row comes back with them.
+  SqlQuery empty(db);
+  empty.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE album_id <> '' AND album_id IN ("
+                               "SELECT album_id FROM youtubemusic_artists_songs WHERE album_id <> '' "
+                               "GROUP BY album_id HAVING sum(CASE WHEN coalesce(song_id, '') <> '' THEN 1 ELSE 0 END) = 0)"));
+  if (!empty.Exec()) {
+    database_->ReportErrors(empty);
+    return;
+  }
+  const int empty_albums = empty.numRowsAffected();
+  if (empty_albums > 0) {
+    qLog(Info) << "YouTubeMusic: removed" << empty_albums << "album row(s) that have no tracks";
+  }
+
 }
 
 void YouTubeMusicService::NormalizeArtistNames() {
