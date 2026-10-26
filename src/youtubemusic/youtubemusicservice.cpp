@@ -875,11 +875,19 @@ void YouTubeMusicService::IndexAlbumTracksReceived(const int slot, const SongMap
     // from the album row this walk used, exactly like the expansion path does. Without it the
     // tracks landed with no album and the album row stayed empty.
     const Song album = index_albums_.value(slot);
+    // The artist is the one whose walk produced this album, not the album's credit line:
+    // "Rezz & PVRIS" is an album credit, and using it split the tree into 1264 artists
+    // (769 of them collaboration strings) instead of the 145 in the library.
+    const QString walked_artist = index_artist_names_.value(index_cursor_);
     for (Song &track : tracks) {
       if (track.album().isEmpty() && !album.album().isEmpty()) track.set_album(album.album());
       if (track.album_id().isEmpty() && !album.album_id().isEmpty()) track.set_album_id(album.album_id());
-      if (track.artist().isEmpty()) track.set_artist(album.artist().isEmpty() ? index_artist_names_.value(index_cursor_) : album.artist());
-      if (track.albumartist().isEmpty()) track.set_albumartist(track.artist());
+      const QString artist = walked_artist.isEmpty() ? album.artist() : walked_artist;
+      if (!artist.isEmpty()) {
+        track.set_artist(artist);
+        track.set_albumsort(track.album());
+        track.set_albumartist(artist);
+      }
     }
     // Only the artists tree stores artist -> album -> track; the albums list holds album rows.
     artists_collection_backend_->AddOrUpdateSongsAsync(tracks);
