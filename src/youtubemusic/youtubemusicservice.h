@@ -309,6 +309,7 @@ class YouTubeMusicService : public StreamingService {
   int index_albums_done_ = 0;
   int index_task_id_ = -1;
   bool index_cancelled_ = false;
+  bool index_artist_had_errors_ = false;
   bool prefetch_ = true;
   QTimer *prefetch_timer_ = nullptr;
   QHash<int, YouTubeMusicRequest *> index_requests_;   // parented, deleteLater'd

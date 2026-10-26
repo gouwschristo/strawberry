@@ -797,6 +797,7 @@ void YouTubeMusicService::StartNextIndexArtist() {
 
   const QString artist_id = index_artist_ids_.at(index_cursor_);
   const QString artist_name = index_artist_names_.at(index_cursor_);
+  index_artist_had_errors_ = false;
 
   task_manager_->SetTaskProgress(index_task_id_, index_cursor_, index_artist_ids_.count());
   Q_EMIT SongsUpdateStatus(tr("Indexing %1 (%2/%3)...").arg(artist_name).arg(index_cursor_ + 1).arg(index_artist_ids_.count()));
@@ -815,7 +816,10 @@ void YouTubeMusicService::IndexArtistAlbumsReceived(const int id, const SongMap 
 
   if (YouTubeMusicRequest *request = index_requests_.take(0)) request->deleteLater();
 
-  if (!error.isEmpty()) qLog(Warning) << "YouTubeMusic: index could not read albums:" << error;
+  if (!error.isEmpty()) {
+    index_artist_had_errors_ = true;
+    qLog(Warning) << "YouTubeMusic: index could not read albums of" << index_artist_names_.value(index_cursor_) << ":" << error;
+  }
 
   for (const Song &album : songs) {
     if (!album.album_id().isEmpty()) index_albums_ << album;
@@ -857,14 +861,24 @@ void YouTubeMusicService::StartNextIndexAlbum() {
 
 void YouTubeMusicService::IndexAlbumTracksReceived(const int slot, const SongMap &songs, const QString &error) {
 
-  Q_UNUSED(error);
+  if (!error.isEmpty()) {
+    index_artist_had_errors_ = true;
+    qLog(Warning) << "YouTubeMusic: index could not read an album of"
+                  << index_artist_names_.value(index_cursor_) << ":" << error;
+  }
 
   if (YouTubeMusicRequest *request = index_requests_.take(slot)) request->deleteLater();
 
   if (!songs.isEmpty()) {
     SongList tracks = songs.values();
+    // An album page lists its tracks with title + duration only: the album context has to come
+    // from the album row this walk used, exactly like the expansion path does. Without it the
+    // tracks landed with no album and the album row stayed empty.
+    const Song album = index_albums_.value(slot);
     for (Song &track : tracks) {
-      if (track.artist().isEmpty()) track.set_artist(index_artist_names_.value(index_cursor_));
+      if (track.album().isEmpty() && !album.album().isEmpty()) track.set_album(album.album());
+      if (track.album_id().isEmpty() && !album.album_id().isEmpty()) track.set_album_id(album.album_id());
+      if (track.artist().isEmpty()) track.set_artist(album.artist().isEmpty() ? index_artist_names_.value(index_cursor_) : album.artist());
       if (track.albumartist().isEmpty()) track.set_albumartist(track.artist());
     }
     // Only the artists tree stores artist -> album -> track; the albums list holds album rows.
@@ -881,7 +895,16 @@ void YouTubeMusicService::IndexAlbumTracksReceived(const int slot, const SongMap
 
 void YouTubeMusicService::FinishIndexAlbum() {
 
-  // Follow the pagination of the next artist once this one is done.
+  // An artist whose albums could not be read is *not* stamped: the next run (button or the
+  // prefetcher) retries it instead of leaving it broken for the whole TTL.
+  if (index_artist_had_errors_) {
+    qLog(Warning) << "YouTubeMusic: leaving" << index_artist_names_.value(index_cursor_)
+                  << "unstamped because some of its albums failed";
+    ++index_cursor_;
+    StartNextIndexArtist();
+    return;
+  }
+
   Settings s;
   s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
   QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
