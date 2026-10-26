@@ -261,6 +261,8 @@ class YouTubeMusicService : public StreamingService {
   int expand_artist_task_id_;
   int track_fetch_task_id_;
   QList<DownloadEntry> download_entries_;
+  // True while the queued container is an artist: its result is a list of albums to expand.
+  bool download_container_is_artist_ = false;
   int current_download_index_;
   SongList download_containers_;
   YouTubeMusicRequestPtr download_container_request_;

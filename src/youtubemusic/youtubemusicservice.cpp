@@ -748,12 +748,16 @@ void YouTubeMusicService::StartNextDownloadContainer() {
   QObject::connect(&*download_container_request_, &YouTubeMusicRequest::UpdateStatus, this, &YouTubeMusicService::SongsUpdateStatusReceived);
 
   if (!container.album_id().isEmpty()) {
+    download_container_is_artist_ = false;
     Q_EMIT SongsUpdateStatus(tr("Fetching tracks of %1 for download...").arg(container.album().isEmpty() ? container.album_id() : container.album()));
     download_container_request_->ProcessAlbum(container);
   }
   else {
-    Q_EMIT SongsUpdateStatus(tr("Fetching tracks of %1 for download...").arg(container.artist()));
-    download_container_request_->ProcessArtist(container);
+    // An artist row means the whole discography: list the albums first, then each album is
+    // queued as its own container so its tracks are fetched and downloaded.
+    download_container_is_artist_ = true;
+    Q_EMIT SongsUpdateStatus(tr("Fetching albums of %1 for download...").arg(container.artist()));
+    download_container_request_->ProcessArtistAlbums(container);
   }
 
 }
@@ -762,7 +766,19 @@ void YouTubeMusicService::DownloadContainerTracksReceived(const int id, const So
 
   Q_UNUSED(id);
 
-  if (error.isEmpty()) {
+  if (error.isEmpty() && download_container_is_artist_) {
+    // The reply is the artist's album list: queue them (in reverse, so takeFirst() walks
+    // them in order) and let the album path fetch the tracks.
+    int queued = 0;
+    for (const Song &album : songs) {
+      if (album.album_id().isEmpty()) continue;
+      download_containers_.prepend(album);
+      ++queued;
+    }
+    qLog(Info) << "YouTubeMusic: queued" << queued << "album(s) for download";
+    Q_EMIT SongsUpdateStatus(tr("Queued %1 album(s) for download, fetching their tracks...").arg(queued));
+  }
+  else if (error.isEmpty()) {
     for (const Song &song : songs) {
       if (!IsDownloadableTrack(song)) continue;
       DownloadEntry entry;
