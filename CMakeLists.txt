@@ -726,6 +726,7 @@ set(SOURCES
   src/covermanager/opentidalcoverprovider.cpp
 
   src/lyrics/lyricsproviders.cpp
+  src/lyrics/youtubemusiclyricsprovider.cpp
   src/lyrics/lyricsprovider.cpp
   src/lyrics/lyricssearchrequest.h
   src/lyrics/lyricssearchresult.h
@@ -1039,6 +1040,7 @@ set(HEADERS
   src/lyrics/elyricsnetlyricsprovider.h
   src/lyrics/letraslyricsprovider.h
   src/lyrics/lrcliblyricsprovider.h
+  src/lyrics/youtubemusiclyricsprovider.h
 
   src/settings/settingsdialog.h
   src/settings/settingspage.h

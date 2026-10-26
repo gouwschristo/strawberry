@@ -71,6 +71,7 @@
 #include "lyrics/elyricsnetlyricsprovider.h"
 #include "lyrics/letraslyricsprovider.h"
 #include "lyrics/lrcliblyricsprovider.h"
+#include "lyrics/youtubemusiclyricsprovider.h"
 
 #include "scrobbler/audioscrobbler.h"
 #include "scrobbler/lastfmscrobbler.h"
@@ -184,6 +185,7 @@ class ApplicationImpl {
           lyrics_providers->AddProvider(new ElyricsNetLyricsProvider(lyrics_providers->network()));
           lyrics_providers->AddProvider(new LetrasLyricsProvider(lyrics_providers->network()));
           lyrics_providers->AddProvider(new LrcLibLyricsProvider(lyrics_providers->network()));
+          lyrics_providers->AddProvider(new YouTubeMusicLyricsProvider(lyrics_providers->network()));
           lyrics_providers->ReloadSettings();
           return lyrics_providers;
         }),
