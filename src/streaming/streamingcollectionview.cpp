@@ -67,6 +67,11 @@ StreamingCollectionView::StreamingCollectionView(QWidget *parent)
       add_to_playlist_enqueue_next_(nullptr),
       open_in_new_playlist_(nullptr),
       remove_songs_(nullptr),
+    download_(nullptr),
+    play_container_(nullptr),
+    add_container_(nullptr),
+    downloadable_(false),
+    expandable_(false),
       is_in_keyboard_search_(false) {
 
   setItemDelegate(new CollectionItemDelegate(this));
@@ -82,11 +87,13 @@ StreamingCollectionView::StreamingCollectionView(QWidget *parent)
 
 }
 
-void StreamingCollectionView::Init(const SharedPtr<CollectionBackend> collection_backend, CollectionModel *collection_model, const bool favorite) {
+void StreamingCollectionView::Init(const SharedPtr<CollectionBackend> collection_backend, CollectionModel *collection_model, const bool favorite, const bool downloadable, const bool expandable) {
 
   collection_backend_ = collection_backend;
   collection_model_ = collection_model;
   favorite_ = favorite;
+  downloadable_ = downloadable;
+  expandable_ = expandable;
 
   ReloadSettings();
 
@@ -326,12 +333,21 @@ void StreamingCollectionView::contextMenuEvent(QContextMenuEvent *e) {
   if (!context_menu_) {
     context_menu_ = new QMenu(this);
     add_to_playlist_ = context_menu_->addAction(IconLoader::Load(u"media-playback-start"_s), tr("Append to current playlist"), this, &StreamingCollectionView::AddToPlaylist);
+    // Album/artist rows are containers: these fetch their tracks first (see the
+    // expandable flag), so "Play" works the same way it does on a single track.
+    play_container_ = context_menu_->addAction(IconLoader::Load(u"media-playback-start"_s), tr("Play"), this, &StreamingCollectionView::PlaySelected);
+    add_container_ = context_menu_->addAction(IconLoader::Load(u"list-add"_s), tr("Add to playlist"), this, &StreamingCollectionView::AddSelected);
     load_ = context_menu_->addAction(IconLoader::Load(u"media-playback-start"_s), tr("Replace current playlist"), this, &StreamingCollectionView::Load);
     open_in_new_playlist_ = context_menu_->addAction(IconLoader::Load(u"document-new"_s), tr("Open in new playlist"), this, &StreamingCollectionView::OpenInNewPlaylist);
 
     context_menu_->addSeparator();
     add_to_playlist_enqueue_ = context_menu_->addAction(IconLoader::Load(u"go-next"_s), tr("Queue track"), this, &StreamingCollectionView::AddToPlaylistEnqueue);
     add_to_playlist_enqueue_next_ = context_menu_->addAction(IconLoader::Load(u"go-next"_s), tr("Queue to play next"), this, &StreamingCollectionView::AddToPlaylistEnqueueNext);
+
+    if (downloadable_) {
+      context_menu_->addSeparator();
+      download_ = context_menu_->addAction(IconLoader::Load(u"document-save"_s), tr("Download"), this, &StreamingCollectionView::Download);
+    }
 
     context_menu_->addSeparator();
 
@@ -353,6 +369,23 @@ void StreamingCollectionView::contextMenuEvent(QContextMenuEvent *e) {
 
   // In all modes
   load_->setEnabled(songs_selected > 0);
+  if (downloadable_ && download_) download_->setEnabled(songs_selected > 0);
+
+  // Only useful when the selection holds rows the service has to resolve first.
+  bool containers_selected = false;
+  if (expandable_) {
+    for (const QModelIndex &idx : selectedIndexes()) {
+      for (const Song &song : GetSongsForIndex(idx)) {
+        if (song.song_id().isEmpty() && (!song.album_id().isEmpty() || !song.artist_id().isEmpty())) {
+          containers_selected = true;
+          break;
+        }
+      }
+      if (containers_selected) break;
+    }
+  }
+  if (play_container_) play_container_->setVisible(containers_selected);
+  if (add_container_) add_container_->setVisible(containers_selected);
   add_to_playlist_->setEnabled(songs_selected > 0);
   open_in_new_playlist_->setEnabled(songs_selected > 0);
   add_to_playlist_enqueue_->setEnabled(songs_selected > 0);
@@ -364,47 +397,59 @@ void StreamingCollectionView::contextMenuEvent(QContextMenuEvent *e) {
 
 void StreamingCollectionView::Load() {
 
-  QMimeData *q_mimedata = model()->mimeData(selectedIndexes());
-  if (MimeData *mimedata = qobject_cast<MimeData*>(q_mimedata)) {
-    mimedata->clear_first_ = true;
-  }
-  Q_EMIT AddToPlaylistSignal(q_mimedata);
+  // Go through the resolving path: a plain mimeData() would put album/artist container
+  // rows into the playlist as unplayable "youtubemusic://album/..." entries.
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT PlaySongsSignal(songs, true, false);
+
+}
+
+void StreamingCollectionView::PlaySelected() {
+
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT PlaySongsSignal(songs, true, true);
+
+}
+
+void StreamingCollectionView::AddSelected() {
+
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT PlaySongsSignal(songs, false, false);
+
+}
+
+void StreamingCollectionView::Download() {
+
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT DownloadSongsSignal(songs);
 
 }
 
 void StreamingCollectionView::AddToPlaylist() {
 
-  Q_EMIT AddToPlaylistSignal(model()->mimeData(selectedIndexes()));
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT PlaySongsSignal(songs, false, false);
 
 }
 
 void StreamingCollectionView::AddToPlaylistEnqueue() {
 
-  QMimeData *q_mimedata = model()->mimeData(selectedIndexes());
-  if (MimeData *mimedata = qobject_cast<MimeData*>(q_mimedata)) {
-    mimedata->enqueue_now_ = true;
-  }
-  Q_EMIT AddToPlaylistSignal(q_mimedata);
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT QueueSongsSignal(songs, false);
 
 }
 
 void StreamingCollectionView::AddToPlaylistEnqueueNext() {
 
-  QMimeData *q_mimedata = model()->mimeData(selectedIndexes());
-  if (MimeData *mimedata = qobject_cast<MimeData*>(q_mimedata)) {
-    mimedata->enqueue_next_now_ = true;
-  }
-  Q_EMIT AddToPlaylistSignal(q_mimedata);
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT QueueSongsSignal(songs, true);
 
 }
 
 void StreamingCollectionView::OpenInNewPlaylist() {
 
-  QMimeData *q_mimedata = model()->mimeData(selectedIndexes());
-  if (MimeData *mimedata = qobject_cast<MimeData*>(q_mimedata)) {
-    mimedata->open_in_new_playlist_ = true;
-  }
-  Q_EMIT AddToPlaylistSignal(q_mimedata);
+  const SongList songs = GetSelectedSongs();
+  if (!songs.isEmpty()) Q_EMIT OpenSongsInNewPlaylistSignal(songs);
 
 }
 
@@ -437,6 +482,14 @@ SongList StreamingCollectionView::GetSelectedSongs() const {
 
   QModelIndexList selected_indexes = qobject_cast<QSortFilterProxyModel*>(model())->mapSelectionToSource(selectionModel()->selection()).indexes();
   return collection_model_->GetChildSongs(selected_indexes);
+
+}
+
+SongList StreamingCollectionView::GetSongsForIndex(const QModelIndex &index) const {
+
+  if (!index.isValid()) return SongList();
+  const QModelIndex source_index = qobject_cast<QSortFilterProxyModel*>(model())->mapToSource(index);
+  return collection_model_->GetChildSongs(source_index);
 
 }
 

@@ -86,6 +86,10 @@
 #  include "tidal/tidalservice.h"
 #  include "tidalsettingspage.h"
 #endif
+#ifdef HAVE_YOUTUBEMUSIC
+#  include "youtubemusic/youtubemusicservice.h"
+#  include "youtubemusicsettingspage.h"
+#endif
 #ifdef HAVE_SPOTIFY
 #  include "spotify/spotifyservice.h"
 #  include "spotifysettingspage.h"
@@ -163,6 +167,9 @@ SettingsDialog::SettingsDialog(const SharedPtr<Player> player,
 #endif
 #ifdef HAVE_TIDAL
   AddPage(Page::Tidal, new TidalSettingsPage(this, streaming_services->Service<TidalService>(), this), streaming);
+#endif
+#ifdef HAVE_YOUTUBEMUSIC
+  AddPage(Page::YouTubeMusic, new YouTubeMusicSettingsPage(this, streaming_services->Service<YouTubeMusicService>(), this), streaming);
 #endif
 #ifdef HAVE_SPOTIFY
   AddPage(Page::Spotify, new SpotifySettingsPage(this, streaming_services->Service<SpotifyService>(), this), streaming);

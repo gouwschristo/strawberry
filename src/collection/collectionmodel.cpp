@@ -93,6 +93,7 @@ CollectionModel::CollectionModel(const SharedPtr<CollectionBackend> backend, con
       filter_(new CollectionFilter(this)),
       timer_update_(new QTimer(this)),
       icon_artist_(IconLoader::Load(u"folder-sound"_s)),
+      icon_album_(IconLoader::Load(u"media-optical"_s)),
       use_disk_cache_(false),
       total_song_count_(0),
       total_artist_count_(0),
@@ -288,6 +289,26 @@ void CollectionModel::SetFilterMinRating(const float filter_min_rating) {
 
 }
 
+bool CollectionModel::hasChildren(const QModelIndex &parent) const {
+
+  // Container rows stay expandable while still empty: the streaming views fetch the
+  // tracks/albums for the container id when the row is expanded, so no placeholder child
+  // row is needed.
+  if (parent.isValid()) {
+    const CollectionItem *item = IndexToItem(parent);
+    if (item && item->type == CollectionItem::Type::Container && item->expandable) return true;
+  }
+
+  return QAbstractItemModel::hasChildren(parent);
+
+}
+
+// A row that only describes a container (album/artist page) - it has no song id of its
+// own and is never a playable track, so it must not become a leaf in the tree.
+static bool IsContainerDescriptor(const Song &song) {
+  return song.song_id().isEmpty() && (!song.album_id().isEmpty() || !song.artist_id().isEmpty());
+}
+
 QVariant CollectionModel::data(const QModelIndex &idx, const int role) const {
 
   return data(IndexToItem(idx), role);
@@ -313,6 +334,10 @@ QVariant CollectionModel::data(CollectionItem *item, const int role) const {
             case GroupBy::YearAlbumDisc:
             case GroupBy::OriginalYearAlbum:
             case GroupBy::OriginalYearAlbumDisc:
+              // Streaming views ask for small container icons so that album rows match
+              // the size of their parent artist rows (a QPixmap cover is drawn at its
+              // natural size, an icon is scaled to the row's decoration size).
+              if (use_small_icons_) return icon_album_;
               return options_active_.show_pretty_covers ? const_cast<CollectionModel*>(this)->AlbumIcon(item) : QVariant();
             case GroupBy::Artist:
             case GroupBy::AlbumArtist:
@@ -337,6 +362,9 @@ QVariant CollectionModel::data(CollectionItem *item, const int role) const {
 
     case Role_ContainerKey:
       return item->container_key;
+
+    case Role_ContainerId:
+      return item->container_id;
 
     case Role_Editable:{
       if (item->type == CollectionItem::Type::Container) {
@@ -694,8 +722,15 @@ void CollectionModel::AddSongsInternal(const SongList &songs) {
         container_key = container->container_key;
       }
       else {
+        // A row with no album has nothing to say about the album level: listing it under
+        // an "Unknown" album would add a level the user has to drill into for no reason.
+        // Same for a descriptor row (album/artist page) and for a row without an artist
+        // name at an artist level.
+        if (IsAlbumGroupBy(group_by) && song.album().isEmpty()) break;
+        if (IsArtistGroupBy(group_by) && song.artist().isEmpty()) break;
+        const QString level_key = ContainerKey(group_by, song, has_unique_album_identifier);
         if (!container_key.isEmpty()) container_key.append(u'-');
-        container_key.append(ContainerKey(group_by, song, has_unique_album_identifier));
+        container_key.append(level_key);
         if (container_nodes_[i].contains(container_key)) {
           container = container_nodes_[i].value(container_key);
         }
@@ -718,6 +753,9 @@ void CollectionModel::AddSongsInternal(const SongList &songs) {
 
     if (!bulk_mode_) beginInsertRows(ItemToIndex(container), first, last);
     for (const Song &song : container_songs) {
+      // The container already exists; a descriptor row adds no information to the tree
+      // (it used to show up as a copy of its own container or as a blank line).
+      if (IsContainerDescriptor(song)) continue;
       CollectionItem *item = new CollectionItem(CollectionItem::Type::Song, container);
       SetSongItemData(item, song);
       song_nodes_.insert(song.id(), item);
@@ -735,7 +773,10 @@ void CollectionModel::UpdateSongsInternal(const SongList &songs) {
 
   for (const Song &new_song : songs) {
     if (!song_nodes_.contains(new_song.id())) {
-      qLog(Error) << "Song does not exist in model" << new_song.id() << new_song.PrettyTitleWithArtist();
+      // Container descriptor rows are intentionally not part of the tree.
+      if (!IsContainerDescriptor(new_song)) {
+        qLog(Error) << "Song does not exist in model" << new_song.id() << new_song.PrettyTitleWithArtist();
+      }
       continue;
     }
     CollectionItem *item = song_nodes_.value(new_song.id());
@@ -899,6 +940,11 @@ CollectionItem *CollectionModel::CreateContainerItem(const GroupBy group_by, con
   CollectionItem *item = new CollectionItem(CollectionItem::Type::Container, parent);
   item->container_level = container_level;
   item->container_key = container_key;
+  // The row that describes this container carries the service id; keep it so the view can
+  // fetch children on expand without a placeholder row.
+  item->expandable = IsContainerDescriptor(song);
+  if (IsArtistGroupBy(group_by)) item->container_id = song.artist_id();
+  else if (IsAlbumGroupBy(group_by)) item->container_id = song.album_id();
   item->display_text = DisplayText(group_by, song);
   item->sort_text = SortText(group_by, song, options_active_.sort_skip_articles_for_artists, options_active_.sort_skip_articles_for_albums, options_active_.use_sort_tags);
   if (!divider_key.isEmpty()) {
@@ -930,6 +976,8 @@ void CollectionModel::CreateDividerItem(const QString &divider_key, const QStrin
 
 void CollectionModel::CreateSongItem(const Song &song, CollectionItem *parent) {
 
+  if (IsContainerDescriptor(song)) return;
+
   if (!bulk_mode_) beginInsertRows(ItemToIndex(parent), static_cast<int>(parent->children.count()), static_cast<int>(parent->children.count()));
 
   CollectionItem *item = new CollectionItem(CollectionItem::Type::Song, parent);
@@ -942,7 +990,13 @@ void CollectionModel::CreateSongItem(const Song &song, CollectionItem *parent) {
 
 void CollectionModel::SetSongItemData(CollectionItem *item, const Song &song) const {
 
-  item->display_text = song.TitleWithCompilationArtist();
+  // Streaming services insert rows that only describe a container (an artist or an
+  // album): they have no title, which used to render as a blank line in the tree.
+  QString display_text = song.TitleWithCompilationArtist();
+  if (display_text.isEmpty()) display_text = song.album();
+  if (display_text.isEmpty()) display_text = song.artist();
+  if (display_text.isEmpty()) display_text = tr("Unknown");
+  item->display_text = display_text;
   item->sort_text = HasParentAlbumGroupBy(item->parent) ? SortTextForSong(song) : SortText(song.title());
   item->metadata = song;
 

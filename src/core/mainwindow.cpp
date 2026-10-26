@@ -53,6 +53,7 @@
 #include <QTimer>
 #include <QKeySequence>
 #include <QMenu>
+#include <QStatusBar>
 #include <QAction>
 #include <QActionGroup>
 #include <QShortcut>
@@ -92,6 +93,7 @@
 #include "includes/shared_ptr.h"
 #include "core/commandlineoptions.h"
 #include "core/mimedata.h"
+#include "core/songmimedata.h"
 #include "core/iconloader.h"
 #include "core/taskmanager.h"
 #include "core/song.h"
@@ -173,6 +175,11 @@
 #ifdef HAVE_TIDAL
 #  include "tidal/tidalservice.h"
 #  include "constants/tidalsettings.h"
+#endif
+#ifdef HAVE_YOUTUBEMUSIC
+#  include "youtubemusic/youtubemusicservice.h"
+#  include "youtubemusic/youtubemusicdownloaddialog.h"
+#  include "constants/youtubemusicsettings.h"
 #endif
 #ifdef HAVE_SPOTIFY
 #  include "spotify/spotifyservice.h"
@@ -376,6 +383,9 @@ MainWindow::MainWindow(Application *app,
 #ifdef HAVE_TIDAL
       tidal_view_(new StreamingTabsView(app->streaming_services()->ServiceBySource(Song::Source::Tidal), app->albumcover_loader(), QLatin1String(TidalSettings::kSettingsGroup), this)),
 #endif
+#ifdef HAVE_YOUTUBEMUSIC
+      youtubemusic_view_(new StreamingTabsView(app->streaming_services()->ServiceBySource(Song::Source::YouTubeMusic), app->albumcover_loader(), QLatin1String(YouTubeMusicSettings::kSettingsGroup), this)),
+#endif
 #ifdef HAVE_SPOTIFY
       spotify_view_(new StreamingTabsView(app->streaming_services()->ServiceBySource(Song::Source::Spotify), app->albumcover_loader(), QLatin1String(SpotifySettings::kSettingsGroup), this)),
 #endif
@@ -455,7 +465,12 @@ MainWindow::MainWindow(Application *app,
   StyleHelper::setBaseColor(palette().color(QPalette::Highlight).darker());
 
   // Add tabs to the fancy tab widget
-  ui_->tabs->AddTab(context_view_, u"context"_s, IconLoader::Load(u"strawberry"_s, true, 0, 32), tr("Context"));
+  // The context tab uses a dedicated monochrome icon name so it can be themed
+  // separately from the application/tray icon ("strawberry"), which should keep
+  // its colored artwork. Falls back to the application icon if not present.
+  QIcon context_tab_icon = IconLoader::Load(u"context"_s, true, 0, 32);
+  if (context_tab_icon.isNull()) context_tab_icon = IconLoader::Load(u"strawberry"_s);
+  ui_->tabs->AddTab(context_view_, u"context"_s, context_tab_icon, tr("Context"));
   ui_->tabs->AddTab(collection_view_, u"collection"_s, IconLoader::Load(u"library-music"_s, true, 0, 32), tr("Collection"));
   ui_->tabs->AddTab(queue_view_, u"queue"_s, IconLoader::Load(u"footsteps"_s, true, 0, 32), tr("Queue"));
   ui_->tabs->AddTab(playlist_list_, u"playlists"_s, IconLoader::Load(u"view-media-playlist"_s, true, 0, 32), tr("Playlists"));
@@ -468,6 +483,9 @@ MainWindow::MainWindow(Application *app,
 #endif
 #ifdef HAVE_TIDAL
   ui_->tabs->AddTab(tidal_view_, u"tidal"_s, IconLoader::Load(u"tidal"_s, true, 0, 32), tr("Tidal"));
+#endif
+#ifdef HAVE_YOUTUBEMUSIC
+  ui_->tabs->AddTab(youtubemusic_view_, u"youtubemusic"_s, IconLoader::Load(u"youtubemusic"_s, true, 0, 32), tr("YouTube Music"));
 #endif
 #ifdef HAVE_SPOTIFY
   ui_->tabs->AddTab(spotify_view_, u"spotify"_s, IconLoader::Load(u"spotify"_s, true, 0, 32), tr("Spotify"));
@@ -835,6 +853,24 @@ MainWindow::MainWindow(Application *app,
   }
 #endif
 
+#ifdef HAVE_YOUTUBEMUSIC
+  QObject::connect(youtubemusic_view_, &StreamingTabsView::OpenSettingsDialog, this, &MainWindow::OpenServiceSettingsDialog);
+  QObject::connect(youtubemusic_view_->artists_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
+  QObject::connect(youtubemusic_view_->albums_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
+  QObject::connect(youtubemusic_view_->songs_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
+  QObject::connect(youtubemusic_view_->search_view(), &StreamingSearchView::OpenSettingsDialog, this, &MainWindow::OpenServiceSettingsDialog);
+  QObject::connect(youtubemusic_view_->search_view(), &StreamingSearchView::AddToPlaylist, this, &MainWindow::AddToPlaylist);
+  if (YouTubeMusicServicePtr youtubemusicservice = app_->streaming_services()->Service<YouTubeMusicService>()) {
+    QObject::connect(&*youtubemusicservice, &StreamingService::SongsDownloaded, this, &MainWindow::StreamingSongsDownloaded);
+    QObject::connect(&*youtubemusicservice, &YouTubeMusicService::StreamMetadataResolved, this, &MainWindow::ApplyStreamMetadata);
+    // Service messages (expansion failures, cookie problems, unplayable tracks) belong in
+    // the status bar instead of only the log.
+    QObject::connect(&*youtubemusicservice, &StreamingService::SongsUpdateStatus, this, [this](const QString &text) {
+      statusBar()->showMessage(text, 10000);
+    });
+  }
+#endif
+
 #ifdef HAVE_QOBUZ
   QObject::connect(qobuz_view_, &StreamingTabsView::OpenSettingsDialog, this, &MainWindow::OpenServiceSettingsDialog);
   QObject::connect(qobuz_view_->artists_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
@@ -889,6 +925,7 @@ MainWindow::MainWindow(Application *app,
   playlist_menu_->addAction(playlist_rescan_songs_);
   playlist_fetch_metadata_ = playlist_menu_->addAction(IconLoader::Load(u"download"_s), tr("Fetch metadata from service"), this, &MainWindow::FetchStreamingMetadata);
   playlist_menu_->addAction(playlist_fetch_metadata_);
+  playlist_download_ = playlist_menu_->addAction(IconLoader::Load(u"document-save"_s), tr("Download"), this, &MainWindow::PlaylistDownload);
   playlist_menu_->addAction(ui_->action_add_files_to_transcoder);
   playlist_menu_->addSeparator();
   playlist_copy_url_ = playlist_menu_->addAction(IconLoader::Load(u"edit-copy"_s), tr("Copy URL(s)..."), this, &MainWindow::PlaylistCopyUrl);
@@ -938,6 +975,9 @@ MainWindow::MainWindow(Application *app,
 #endif
 
 #if defined(HAVE_SPARKLE) || defined(HAVE_QTSPARKLE)
+#ifdef HAVE_YOUTUBEMUSIC
+  ui_->menu_tools->addAction(IconLoader::Load(u"document-save"_s), tr("YouTube Music downloads..."), this, &MainWindow::ShowYouTubeMusicDownloads);
+#endif
   QAction *action_check_updates = ui_->menu_tools->addAction(tr("Check for updates..."));
   action_check_updates->setMenuRole(QAction::ApplicationSpecificRole);
 #endif
@@ -1031,6 +1071,20 @@ MainWindow::MainWindow(Application *app,
   app_->playlist_manager()->Init(ui_->playlist_sequence, ui_->playlist);
 
   queue_view_->SetPlaylistManager(app_->playlist_manager());
+
+  QObject::connect(queue_view_, &QueueView::DownloadSongs, this, &MainWindow::DownloadStreamingSongs);
+  QObject::connect(queue_view_, &QueueView::PlayRow, this, &MainWindow::PlayPlaylistRow);
+
+
+
+
+
+
+
+
+
+
+
 
   // This connection must be done after the playlists have been initialized.
   QObject::connect(this, &MainWindow::StopAfterToggled, osd_, &OSDBase::StopAfterToggle);
@@ -1323,6 +1377,18 @@ void MainWindow::ReloadSettings() {
   }
 #endif
 
+#ifdef HAVE_YOUTUBEMUSIC
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  bool enable_youtubemusic = s.value(YouTubeMusicSettings::kEnabled, true).toBool();
+  s.endGroup();
+  if (enable_youtubemusic) {
+    ui_->tabs->EnableTab(youtubemusic_view_);
+  }
+  else {
+    ui_->tabs->DisableTab(youtubemusic_view_);
+  }
+#endif
+
 #ifdef HAVE_SPOTIFY
   s.beginGroup(SpotifySettings::kSettingsGroup);
   bool enable_spotify = s.value(SpotifySettings::kEnabled, SpotifySettings::kDefaultEnabled).toBool();
@@ -1393,6 +1459,10 @@ void MainWindow::ReloadAllSettings() {
 #ifdef HAVE_TIDAL
   tidal_view_->ReloadSettings();
   tidal_view_->search_view()->ReloadSettings();
+#endif
+#ifdef HAVE_YOUTUBEMUSIC
+  youtubemusic_view_->ReloadSettings();
+  youtubemusic_view_->search_view()->ReloadSettings();
 #endif
 #ifdef HAVE_SPOTIFY
   spotify_view_->ReloadSettings();
@@ -1971,9 +2041,45 @@ void MainWindow::ApplyPlayBehaviour(const BehaviourSettings::PlayBehaviour b, Mi
   }
 }
 
+void MainWindow::StreamingSongsDownloaded(const QStringList &paths) {
+
+  if (paths.isEmpty()) return;
+
+  // Same as Tools -> Update collection: the watcher walks the library and adds
+  // files it has not seen yet, which is exactly what a finished download is.
+  qLog(Info) << "Downloaded" << paths.count() << "song(s), updating the collection";
+  app_->collection()->IncrementalScan();
+
+}
+
 void MainWindow::AddToPlaylist(QMimeData *q_mimedata) {
 
   if (!q_mimedata) return;
+
+  // Last line of defence: album/artist rows are containers, not playable tracks. Every
+  // view resolves them first, but the queue actions and older paths handed them over
+  // verbatim, which put unplayable "youtubemusic://album/..." rows in the playlist.
+  if (SongMimeData *song_mimedata = qobject_cast<SongMimeData*>(q_mimedata)) {
+    SongList playable;
+    int containers = 0;
+    for (const Song &song : std::as_const(song_mimedata->songs)) {
+      const QUrl url = song.url();
+      const QString host = url.host();
+      if (url.scheme() == u"youtubemusic"_s && (host == u"album"_s || host == u"artist"_s)) {
+        ++containers;
+        continue;
+      }
+      playable << song;
+    }
+    if (containers > 0) {
+      qLog(Info) << "AddToPlaylist: dropped" << containers << "container row(s)";
+      song_mimedata->songs = playable;
+    }
+    if (playable.isEmpty()) {
+      delete q_mimedata;
+      return;
+    }
+  }
 
   if (MimeData *mimedata = qobject_cast<MimeData*>(q_mimedata)) {
     // Should we replace the flags with the user's preference?
@@ -2083,6 +2189,7 @@ void MainWindow::ShowPlaylistContextMenu(const QPoint global_pos, const QModelIn
   int not_in_skipped = 0;
   int local_songs = 0;
   int streaming_songs = 0;
+  int downloadable_songs = 0;
 
   for (const QModelIndex &idx : selection) {
 
@@ -2098,6 +2205,10 @@ void MainWindow::ShowPlaylistContextMenu(const QPoint global_pos, const QModelIn
 
     if (item->EffectiveMetadata().is_stream_service()) {
       ++streaming_songs;
+      // Only services that actually implement downloads get the menu entry.
+      if (SharedPtr<StreamingService> service = app_->streaming_services()->ServiceBySource(item->EffectiveMetadata().source())) {
+        if (service->supports_downloads()) ++downloadable_songs;
+      }
     }
 
     if (item->EffectiveMetadata().has_cue()) {
@@ -2128,6 +2239,9 @@ void MainWindow::ShowPlaylistContextMenu(const QPoint global_pos, const QModelIn
 
   playlist_fetch_metadata_->setEnabled(streaming_songs > 0);
   playlist_fetch_metadata_->setVisible(streaming_songs > 0);
+
+  playlist_download_->setEnabled(downloadable_songs > 0);
+  playlist_download_->setVisible(downloadable_songs > 0);
 
   ui_->action_add_files_to_transcoder->setEnabled(local_songs > 0 && editable > 0);
   ui_->action_add_files_to_transcoder->setVisible(local_songs > 0 && editable > 0);
@@ -3511,6 +3625,11 @@ void MainWindow::FocusSearchField() {
     tidal_view_->FocusSearchField();
   }
 #endif
+#ifdef HAVE_YOUTUBEMUSIC
+  else if (ui_->tabs->currentIndex() == ui_->tabs->IndexOfTab(youtubemusic_view_) && !youtubemusic_view_->SearchFieldHasFocus()) {
+    youtubemusic_view_->FocusSearchField();
+  }
+#endif
 #ifdef HAVE_SPOTIFY
   else if (ui_->tabs->currentIndex() == ui_->tabs->IndexOfTab(spotify_view_) && !spotify_view_->SearchFieldHasFocus()) {
     spotify_view_->FocusSearchField();
@@ -3523,6 +3642,98 @@ void MainWindow::FocusSearchField() {
 #endif
   else if (!ui_->playlist->SearchFieldHasFocus()) {
     ui_->playlist->FocusSearchField();
+  }
+
+}
+
+void MainWindow::ApplyStreamMetadata(const Song &song) {
+
+  Playlist *playlist = app_->playlist_manager()->current();
+  if (!playlist || !song.url().isValid()) return;
+
+  // Rows created from a bare url have no title until the stream is resolved.
+  for (int row = 0; row < playlist->rowCount(); ++row) {
+    PlaylistItemPtr item = playlist->item_at(row);
+    if (!item) continue;
+    const Song existing = item->EffectiveMetadata();
+    if (existing.url() != song.url()) continue;
+    if (!existing.title().isEmpty() && existing.title() != existing.url().toString()) continue;
+
+    Song merged = existing;
+    if (!song.title().isEmpty()) {
+      merged.set_title(song.title());
+      merged.set_titlesort(song.title());
+    }
+    if (!song.artist().isEmpty()) {
+      merged.set_artist(song.artist());
+      merged.set_artistsort(song.artist());
+      merged.set_albumartist(song.artist());
+    }
+    if (!song.album().isEmpty()) merged.set_album(song.album());
+
+    qLog(Info) << "Playlist row" << row << "filled in from the stream:" << merged.artist() << "-" << merged.title();
+    playlist->UpdateItemMetadata(row, item, merged, true);
+    return;
+  }
+
+}
+
+void MainWindow::PlayPlaylistRow(const int row) {
+
+  if (row < 0) return;
+  app_->player()->PlayAt(row, false, 0, EngineBase::TrackChangeType::Manual, Playlist::AutoScroll::Maybe, true);
+
+}
+
+void MainWindow::ShowYouTubeMusicDownloads() {
+
+  YouTubeMusicServicePtr service = app_->streaming_services()->Service<YouTubeMusicService>();
+  if (!service) return;
+
+  YouTubeMusicDownloadDialog dialog(service, this);
+  dialog.exec();
+
+}
+
+void MainWindow::PlaylistDownload() {
+
+  // Group the selected streaming tracks by service so one service call handles them
+  // all (the queue/playlist side of the "Download" action).
+  const QModelIndexList proxy_indexes = ui_->playlist->view()->selectionModel()->selectedRows();
+  QMap<int, SongList> songs_by_source;
+
+  for (const QModelIndex &proxy_index : proxy_indexes) {
+    const QModelIndex source_index = app_->playlist_manager()->current()->filter()->mapToSource(proxy_index);
+    if (!source_index.isValid()) continue;
+    PlaylistItemPtr item(app_->playlist_manager()->current()->item_at(source_index.row()));
+    if (!item) continue;
+
+    const Song song = item->EffectiveMetadata();
+    if (!song.is_stream_service() || !song.url().isValid()) continue;
+    songs_by_source[static_cast<int>(song.source())] << song;
+  }
+
+  for (auto it = songs_by_source.constBegin(); it != songs_by_source.constEnd(); ++it) {
+    SharedPtr<StreamingService> service = app_->streaming_services()->ServiceBySource(static_cast<Song::Source>(it.key()));
+    if (!service || !service->supports_downloads()) continue;
+    service->DownloadSongs(it.value());
+  }
+
+}
+
+void MainWindow::DownloadStreamingSongs(const SongList &songs) {
+
+  // Used by the queue view, which hands over its own selection.
+  QMap<int, SongList> songs_by_source;
+  for (const Song &song : songs) {
+    if (!song.is_stream_service() || !song.url().isValid()) continue;
+    songs_by_source[static_cast<int>(song.source())] << song;
+  }
+
+  for (auto it = songs_by_source.constBegin(); it != songs_by_source.constEnd(); ++it) {
+    SharedPtr<StreamingService> service = app_->streaming_services()->ServiceBySource(static_cast<Song::Source>(it.key()));
+    if (!service || !service->supports_downloads()) continue;
+    service->DownloadSongs(it.value());
   }
 
 }

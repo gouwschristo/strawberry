@@ -34,6 +34,7 @@
 #include "ui_streamingtabsview.h"
 
 class QContextMenuEvent;
+class QModelIndex;
 
 class StreamingService;
 class StreamingCollectionView;
@@ -55,11 +56,23 @@ class StreamingTabsView : public QWidget {
   StreamingSearchView *search_view() const { return ui_->search_view; }
 
   bool SearchFieldHasFocus() const;
+
+  // Handles the Play / Add actions of the collection views, resolving album/artist
+  // rows before they reach the playlist.
+  void PlaySongs(const SongList &songs, const bool replace, const bool play);
+  void OpenSongsInNewPlaylist(const SongList &songs);
+  void QueueSongs(const SongList &songs, const bool next);
+  void ExpandContainerRow(QTreeView *view, const QModelIndex &index, const bool artists_view);
   void FocusSearchField();
 
  private Q_SLOTS:
   void Configure();
   void GetArtists();
+  void AlbumDoubleClicked(const QModelIndex &index);
+  void ArtistDoubleClicked(const QModelIndex &index);
+  void ArtistsRowExpanded(const QModelIndex &index);
+  void AlbumsRowExpanded(const QModelIndex &index);
+  void AlbumTracksReceived(const SongList &songs, const QString &error);
   void GetAlbums();
   void GetSongs();
   void AbortGetArtists();
@@ -73,7 +86,12 @@ class StreamingTabsView : public QWidget {
   void OpenSettingsDialog(const Song::Source source);
 
  private:
+  // What to do with the tracks that arrive for an album/artist row.
+  enum class TracksAction { None, Playlist, Play, Replace, Add, NewPlaylist, Enqueue, EnqueueNext };
+
   const SharedPtr<StreamingService> service_;
+  TracksAction tracks_action_;
+  void ResolveOrEmitSongs(const SongList &songs, const TracksAction action);
   QString settings_group_;
   Ui_StreamingTabsView *ui_;
 };

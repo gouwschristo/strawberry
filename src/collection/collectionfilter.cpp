@@ -44,6 +44,19 @@ CollectionFilter::CollectionFilter(QObject *parent) : QSortFilterProxyModel(pare
 
 }
 
+bool CollectionFilter::hasChildren(const QModelIndex &parent) const {
+
+  if (!sourceModel()) return false;
+  if (!parent.isValid()) return QSortFilterProxyModel::hasChildren(parent);
+
+  // An empty-but-expandable container (streaming album/artist row) has no proxy rows yet;
+  // ask the source model so the view still offers the expand arrow.
+  if (QSortFilterProxyModel::hasChildren(parent)) return true;
+
+  return sourceModel()->hasChildren(mapToSource(parent));
+
+}
+
 bool CollectionFilter::filterAcceptsRow(const int source_row, const QModelIndex &source_parent) const {
 
   if (filter_string_.isEmpty()) return true;

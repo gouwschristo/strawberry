@@ -70,6 +70,11 @@ class CollectionModel : public SimpleTreeModel<CollectionItem> {
 
   static const int kPrettyCoverSize;
 
+  // Draw album containers with a small theme icon instead of a cover pixmap, so rows of
+  // different depths line up (a QPixmap is painted at its natural size, an icon is
+  // scaled to the view's decoration size). Used by the streaming views.
+  void SetUseSmallIcons(const bool use_small_icons) { use_small_icons_ = use_small_icons; }
+
   enum Role {
     Role_Type = Qt::UserRole + 1,
     Role_ContainerType,
@@ -77,6 +82,7 @@ class CollectionModel : public SimpleTreeModel<CollectionItem> {
     Role_ContainerKey,
     Role_IsDivider,
     Role_Editable,
+    Role_ContainerId,   // service id of an album/artist container (empty when unknown)
     LastRole
   };
 
@@ -173,6 +179,7 @@ class CollectionModel : public SimpleTreeModel<CollectionItem> {
 
   // QAbstractItemModel
   QVariant data(const QModelIndex &idx, const int role = Qt::DisplayRole) const override;
+  bool hasChildren(const QModelIndex &parent = QModelIndex()) const override;
   Qt::ItemFlags flags(const QModelIndex &idx) const override;
   QStringList mimeTypes() const override;
   QMimeData *mimeData(const QModelIndexList &indexes) const override;
@@ -297,11 +304,13 @@ class CollectionModel : public SimpleTreeModel<CollectionItem> {
 
   QPixmap pixmap_no_cover_;
   QIcon icon_artist_;
+  QIcon icon_album_;
 
   Options options_current_;
   Options options_active_;
 
   bool use_disk_cache_;
+  bool use_small_icons_ = false;
   AlbumCoverLoaderOptions::Types cover_types_;
 
   int total_song_count_;

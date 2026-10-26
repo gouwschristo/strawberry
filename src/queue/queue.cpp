@@ -184,6 +184,9 @@ QVariant Queue::data(const QModelIndex &proxy_index, int role) const {
 void Queue::ToggleTracks(const QModelIndexList &source_indexes) {
 
   for (const QModelIndex &source_index : source_indexes) {
+    // A stale index (row removed while the selection was held) used to be enqueued as a
+    // dangling item, which later crashed in UpdateTotalLength().
+    if (!source_index.isValid()) continue;
     QModelIndex proxy_index = mapFromSource(source_index);
     if (proxy_index.isValid()) {
       // Dequeue the track
@@ -208,6 +211,9 @@ void Queue::InsertFirst(const QModelIndexList &source_indexes) {
   if (source_indexes.isEmpty()) return;
 
   for (const QModelIndex &source_index : source_indexes) {
+    // A stale index (row removed while the selection was held) used to be enqueued as a
+    // dangling item, which later crashed in UpdateTotalLength().
+    if (!source_index.isValid()) continue;
     QModelIndex proxy_index = mapFromSource(source_index);
     if (proxy_index.isValid()) {
       // Already in the queue, so remove it to be reinserted later

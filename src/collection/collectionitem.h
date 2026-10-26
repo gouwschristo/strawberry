@@ -41,6 +41,10 @@ class CollectionItem : public SimpleTreeItem<CollectionItem> {
   Song metadata;
   CollectionItem *compilation_artist_node_;
   QString divider_key;
+  // For containers: the service id of the album/artist this container describes, so the
+  // view can expand it without a placeholder child row.
+  QString container_id;
+  bool expandable = false;
 
  private:
   Q_DISABLE_COPY(CollectionItem)

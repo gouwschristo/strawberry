@@ -382,6 +382,7 @@ optional_component(SUBSONIC ON "Streaming: Subsonic")
 optional_component(TIDAL ON "Streaming: Tidal")
 optional_component(SPOTIFY ON "Streaming: Spotify")
 optional_component(QOBUZ ON "Streaming: Qobuz")
+optional_component(YOUTUBEMUSIC ON "Streaming: YouTube Music")
 
 optional_component(MOODBAR ON "Moodbar")
 
@@ -1512,6 +1513,27 @@ optional_source(HAVE_TIDAL
     src/covermanager/tidalcoverprovider.h
   UI
     src/settings/tidalsettingspage.ui
+)
+
+optional_source(HAVE_YOUTUBEMUSIC
+  SOURCES
+    src/youtubemusic/youtubemusicservice.cpp
+    src/youtubemusic/youtubemusicurlhandler.cpp
+    src/youtubemusic/youtubemusicbaserequest.cpp
+    src/youtubemusic/youtubemusicrequest.cpp
+    src/youtubemusic/youtubemusicstreamurlrequest.cpp
+    src/youtubemusic/youtubemusicdownloadrequest.cpp
+    src/youtubemusic/youtubemusicdownloaddialog.cpp
+    src/settings/youtubemusicsettingspage.cpp
+  HEADERS
+    src/youtubemusic/youtubemusicservice.h
+    src/youtubemusic/youtubemusicurlhandler.h
+    src/youtubemusic/youtubemusicbaserequest.h
+    src/youtubemusic/youtubemusicrequest.h
+    src/youtubemusic/youtubemusicstreamurlrequest.h
+    src/youtubemusic/youtubemusicdownloadrequest.h
+    src/youtubemusic/youtubemusicdownloaddialog.h
+    src/settings/youtubemusicsettingspage.h
 )
 
 optional_source(HAVE_SPOTIFY

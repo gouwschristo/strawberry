@@ -28,12 +28,18 @@
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTabWidget>
+#include <functional>
+
+#include <QTimer>
+#include <QTreeView>
 #include <QStackedWidget>
 #include <QContextMenuEvent>
 #include <QAction>
 #include <QSettings>
 
 #include "core/iconloader.h"
+#include "core/logging.h"
+#include "core/songmimedata.h"
 #include "core/settings.h"
 #include "collection/collectionbackend.h"
 #include "collection/collectionmodel.h"
@@ -70,7 +76,10 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
 
   if (service_->artists_collection_model()) {
     ui_->artists_collection->stacked()->setCurrentWidget(ui_->artists_collection->streamingcollection_page());
-    ui_->artists_collection->view()->Init(service_->artists_collection_backend(), service_->artists_collection_model(), true);
+    ui_->artists_collection->view()->Init(service_->artists_collection_backend(), service_->artists_collection_model(), true, service_->supports_downloads(), service_->supports_album_tracks());
+    QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::PlaySongsSignal, this, &StreamingTabsView::PlaySongs);
+    QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::QueueSongsSignal, this, &StreamingTabsView::QueueSongs);
+    QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->artists_collection->view()->setModel(service_->artists_collection_filter_model());
     ui_->artists_collection->view()->SetFilter(ui_->artists_collection->filter_widget());
     ui_->artists_collection->filter_widget()->SetSettingsGroup(settings_group);
@@ -79,6 +88,8 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->artists_collection->filter_widget()->AddMenuAction(action_configure);
 
     QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::GetSongs, this, &StreamingTabsView::GetArtists);
+    QObject::connect(ui_->artists_collection->view(), &QAbstractItemView::doubleClicked, this, &StreamingTabsView::ArtistDoubleClicked);
+    QObject::connect(ui_->artists_collection->view(), &QTreeView::expanded, this, &StreamingTabsView::ArtistsRowExpanded);
     QObject::connect(ui_->artists_collection->view(), &StreamingCollectionView::RemoveSongs, &*service_, &StreamingService::RemoveArtists);
 
     QObject::connect(ui_->artists_collection->button_refresh(), &QPushButton::clicked, this, &StreamingTabsView::GetArtists);
@@ -102,7 +113,10 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
 
   if (service_->albums_collection_model()) {
     ui_->albums_collection->stacked()->setCurrentWidget(ui_->albums_collection->streamingcollection_page());
-    ui_->albums_collection->view()->Init(service_->albums_collection_backend(), service_->albums_collection_model(), true);
+    ui_->albums_collection->view()->Init(service_->albums_collection_backend(), service_->albums_collection_model(), true, service_->supports_downloads(), service_->supports_album_tracks());
+    QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::PlaySongsSignal, this, &StreamingTabsView::PlaySongs);
+    QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::QueueSongsSignal, this, &StreamingTabsView::QueueSongs);
+    QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->albums_collection->view()->setModel(service_->albums_collection_filter_model());
     ui_->albums_collection->view()->SetFilter(ui_->albums_collection->filter_widget());
     ui_->albums_collection->filter_widget()->SetSettingsGroup(settings_group);
@@ -111,6 +125,8 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     ui_->albums_collection->filter_widget()->AddMenuAction(action_configure);
 
     QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::GetSongs, this, &StreamingTabsView::GetAlbums);
+    QObject::connect(ui_->albums_collection->view(), &QAbstractItemView::doubleClicked, this, &StreamingTabsView::AlbumDoubleClicked);
+    QObject::connect(ui_->albums_collection->view(), &QTreeView::expanded, this, &StreamingTabsView::AlbumsRowExpanded);
     QObject::connect(ui_->albums_collection->view(), &StreamingCollectionView::RemoveSongs, &*service_, &StreamingService::RemoveAlbums);
 
     QObject::connect(ui_->albums_collection->button_refresh(), &QPushButton::clicked, this, &StreamingTabsView::GetAlbums);
@@ -134,7 +150,10 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
 
   if (service_->songs_collection_model()) {
     ui_->songs_collection->stacked()->setCurrentWidget(ui_->songs_collection->streamingcollection_page());
-    ui_->songs_collection->view()->Init(service_->songs_collection_backend(), service_->songs_collection_model(), true);
+    ui_->songs_collection->view()->Init(service_->songs_collection_backend(), service_->songs_collection_model(), true, service_->supports_downloads(), service_->supports_album_tracks());
+    QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::PlaySongsSignal, this, &StreamingTabsView::PlaySongs);
+    QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::QueueSongsSignal, this, &StreamingTabsView::QueueSongs);
+    QObject::connect(ui_->songs_collection->view(), &StreamingCollectionView::OpenSongsInNewPlaylistSignal, this, &StreamingTabsView::OpenSongsInNewPlaylist);
     ui_->songs_collection->view()->setModel(service_->songs_collection_filter_model());
     ui_->songs_collection->view()->SetFilter(ui_->songs_collection->filter_widget());
     ui_->songs_collection->filter_widget()->SetSettingsGroup(settings_group);
@@ -153,7 +172,15 @@ StreamingTabsView::StreamingTabsView(const StreamingServicePtr service, const Sh
     QObject::connect(&*service_, &StreamingService::SongsProgressSetMaximum, ui_->songs_collection->progressbar(), &QProgressBar::setMaximum);
     QObject::connect(&*service_, &StreamingService::SongsUpdateProgress, ui_->songs_collection->progressbar(), &QProgressBar::setValue);
 
-    QObject::connect(service_->songs_collection_model(), &CollectionModel::TotalArtistCountUpdated, ui_->songs_collection->view(), &StreamingCollectionView::TotalArtistCountUpdated);
+    tracks_action_ = TracksAction::None;
+  QObject::connect(&*service_, &StreamingService::AlbumTracksLoaded, this, &StreamingTabsView::AlbumTracksReceived);
+
+  // Album rows are children of artist rows here, and a cover pixmap would be drawn at
+  // kPrettyCoverSize while the artist icon is a 16px icon - use one icon size.
+  service_->artists_collection_model()->SetUseSmallIcons(true);
+  service_->albums_collection_model()->SetUseSmallIcons(true);
+  service_->songs_collection_model()->SetUseSmallIcons(true);
+  QObject::connect(service_->songs_collection_model(), &CollectionModel::TotalArtistCountUpdated, ui_->songs_collection->view(), &StreamingCollectionView::TotalArtistCountUpdated);
     QObject::connect(service_->songs_collection_model(), &CollectionModel::TotalAlbumCountUpdated, ui_->songs_collection->view(), &StreamingCollectionView::TotalAlbumCountUpdated);
     QObject::connect(service_->songs_collection_model(), &CollectionModel::TotalSongCountUpdated, ui_->songs_collection->view(), &StreamingCollectionView::TotalSongCountUpdated);
     QObject::connect(service_->songs_collection_model(), &CollectionModel::modelAboutToBeReset, ui_->songs_collection->view(), &StreamingCollectionView::SaveFocus);
@@ -295,6 +322,233 @@ void StreamingTabsView::GetAlbums() {
   ui_->albums_collection->button_close()->hide();
   ui_->albums_collection->stacked()->setCurrentWidget(ui_->albums_collection->help_page());
   service_->GetAlbums();
+
+}
+
+void StreamingTabsView::AlbumDoubleClicked(const QModelIndex &index) {
+
+  Q_UNUSED(index);
+
+  // Double clicking an album/artist row loads its tracks instead of adding the
+  // (unplayable) container row itself to the playlist.
+  if (!service_->supports_album_tracks()) return;
+
+  const SongList songs = ui_->albums_collection->view()->GetSelectedSongs();
+  for (const Song &song : songs) {
+    if (song.song_id().isEmpty() && !song.album_id().isEmpty()) {
+      tracks_action_ = TracksAction::Playlist;
+      service_->GetAlbumTracks(song);
+    }
+  }
+
+}
+
+void StreamingTabsView::ArtistDoubleClicked(const QModelIndex &index) {
+
+  Q_UNUSED(index);
+
+  if (!service_->supports_album_tracks()) return;
+
+  const SongList songs = ui_->artists_collection->view()->GetSelectedSongs();
+  for (const Song &song : songs) {
+    if (song.song_id().isEmpty() && !song.artist_id().isEmpty()) {
+      tracks_action_ = TracksAction::Playlist;
+      service_->GetArtistTracks(song);
+    }
+  }
+
+}
+
+void StreamingTabsView::ArtistsRowExpanded(const QModelIndex &index) {
+
+  ExpandContainerRow(ui_->artists_collection->view(), index, true);
+
+}
+
+void StreamingTabsView::AlbumsRowExpanded(const QModelIndex &index) {
+
+  ExpandContainerRow(ui_->albums_collection->view(), index, false);
+
+}
+
+
+
+
+
+void StreamingTabsView::ExpandContainerRow(QTreeView *view, const QModelIndex &index, const bool artists_view) {
+
+  if (!service_->supports_album_tracks()) return;
+
+  // Rows live in the collection, so a container that already lists children was expanded
+  // before (possibly in an earlier session) - nothing to fetch.
+  if (!index.isValid() || view->model()->rowCount(index) > 0) return;
+
+  const QString container_id = index.data(CollectionModel::Role_ContainerId).toString();
+  // DisplayRole is the human name; Role_ContainerKey is a composite key
+  // ("artist-album-id") and must never be used as an album or artist name.
+  const QString container_name = index.data(Qt::DisplayRole).toString();
+  if (container_id.isEmpty()) return;
+
+  const int group_by = index.data(CollectionModel::Role_ContainerType).toInt();
+  const bool is_artist_level = group_by == static_cast<int>(CollectionModel::GroupBy::Artist) ||
+                               group_by == static_cast<int>(CollectionModel::GroupBy::AlbumArtist);
+
+  if (is_artist_level) {
+    Song artist(Song::Source::YouTubeMusic);
+    artist.set_url(QUrl(QStringLiteral("youtubemusic://artist/%1").arg(container_id)));
+    artist.set_artist(container_name);
+    artist.set_artist_id(container_id);
+    service_->ExpandArtistRow(artist);
+    return;
+  }
+
+  // Album level: keep the parent artist name so the tracks group under that artist.
+  Song album(Song::Source::YouTubeMusic);
+  album.set_url(QUrl(QStringLiteral("youtubemusic://album/%1").arg(container_id)));
+  album.set_album(container_name);
+  album.set_album_id(container_id);
+  album.set_artist(index.parent().data().toString());
+  album.set_albumartist(index.parent().data().toString());
+  service_->ExpandAlbumRow(album, artists_view);
+
+}
+
+void StreamingTabsView::PlaySongs(const SongList &songs, const bool replace, const bool play) {
+
+  if (!replace) ResolveOrEmitSongs(songs, TracksAction::Add);
+  else ResolveOrEmitSongs(songs, play ? TracksAction::Play : TracksAction::Replace);
+
+}
+
+void StreamingTabsView::OpenSongsInNewPlaylist(const SongList &songs) {
+
+  ResolveOrEmitSongs(songs, TracksAction::NewPlaylist);
+
+}
+
+
+
+void StreamingTabsView::QueueSongs(const SongList &songs, const bool next) {
+
+  ResolveOrEmitSongs(songs, next ? TracksAction::EnqueueNext : TracksAction::Enqueue);
+
+}
+
+void StreamingTabsView::ResolveOrEmitSongs(const SongList &songs, const TracksAction action) {
+
+  SongList tracks;
+
+  for (Song song : songs) {
+    // A song without a playable url must never reach the playlist: the engine answers
+    // with 'Invalid URI ""' and the entry cannot be played at all. Songs that only carry
+    // an id (search results built from an id, playlist rows restored from a file) get
+    // their url reconstructed.
+    if (!song.url().isValid() || song.url().isEmpty()) {
+      // Container rows (album/artist) are resolved separately, never reconstructed here.
+      if (!song.album_id().isEmpty() || !song.artist_id().isEmpty()) continue;
+      if (song.song_id().isEmpty()) {
+        qLog(Warning) << "Skipping song without url or id:" << song.title();
+        continue;
+      }
+      song.set_url(QUrl(QStringLiteral("youtubemusic://song/%1").arg(song.song_id())));
+    }
+    if (song.song_id().isEmpty() && (!song.album_id().isEmpty() || !song.artist_id().isEmpty())) {
+      // Container row: the tracks arrive asynchronously.
+      if (!service_->supports_album_tracks()) continue;
+      tracks_action_ = action;
+      if (!song.album_id().isEmpty()) service_->GetAlbumTracks(song);
+      else service_->GetArtistTracks(song);
+    }
+    else {
+      tracks << song;
+    }
+  }
+
+  if (tracks.isEmpty()) return;
+
+  SongMimeData *mimedata = new SongMimeData;
+  mimedata->songs = tracks;
+  mimedata->override_user_settings_ = true;
+
+  switch (action) {
+    case TracksAction::Play:
+      // override_user_settings_ matters: without it MainWindow re-applies the user's
+      // menu behaviour on top of these flags and the action turns into an append.
+      mimedata->override_user_settings_ = true;
+      mimedata->clear_first_ = true;
+      mimedata->play_now_ = true;
+      break;
+    case TracksAction::Replace:
+      mimedata->override_user_settings_ = true;
+      mimedata->clear_first_ = true;
+      break;
+    case TracksAction::NewPlaylist:
+      mimedata->open_in_new_playlist_ = true;
+      break;
+    case TracksAction::Enqueue:
+      mimedata->override_user_settings_ = true;
+      mimedata->enqueue_now_ = true;
+      break;
+    case TracksAction::EnqueueNext:
+      mimedata->override_user_settings_ = true;
+      mimedata->enqueue_next_now_ = true;
+      break;
+    case TracksAction::Add:
+    case TracksAction::Playlist:
+    case TracksAction::None:
+      break;
+  }
+
+  Q_EMIT ui_->albums_collection->view()->AddToPlaylistSignal(mimedata);
+
+}
+
+void StreamingTabsView::AlbumTracksReceived(const SongList &songs, const QString &error) {
+
+  if (songs.isEmpty()) {
+    if (!error.isEmpty()) Q_EMIT OpenSettingsDialog(service_->source());
+    return;
+  }
+
+  SongMimeData *mimedata = new SongMimeData;
+  mimedata->songs = songs;
+
+  switch (tracks_action_) {
+    case TracksAction::Play:
+      mimedata->override_user_settings_ = true;
+      mimedata->clear_first_ = true;
+      mimedata->play_now_ = true;
+      break;
+    case TracksAction::Replace:
+      mimedata->override_user_settings_ = true;
+      mimedata->clear_first_ = true;
+      break;
+    case TracksAction::Add:
+      mimedata->override_user_settings_ = true;
+      break;
+    case TracksAction::NewPlaylist:
+      mimedata->override_user_settings_ = true;
+      mimedata->open_in_new_playlist_ = true;
+      break;
+    case TracksAction::Enqueue:
+      mimedata->override_user_settings_ = true;
+      mimedata->enqueue_now_ = true;
+      break;
+    case TracksAction::EnqueueNext:
+      mimedata->override_user_settings_ = true;
+      mimedata->enqueue_next_now_ = true;
+      break;
+    case TracksAction::Playlist:
+      mimedata->from_doubleclick_ = true;
+      break;
+    case TracksAction::None:
+      break;
+  }
+  tracks_action_ = TracksAction::None;
+
+  // MainWindow::AddToPlaylist() takes ownership and deletes the mime data, so
+  // nothing may touch it afterwards.
+  Q_EMIT ui_->albums_collection->view()->AddToPlaylistSignal(mimedata);
 
 }
 

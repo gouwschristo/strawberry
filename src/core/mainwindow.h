@@ -220,6 +220,12 @@ class MainWindow : public QMainWindow, public PlatformInterface {
 
   void OpenCollectionSettingsDialog();
   void OpenServiceSettingsDialog(const Song::Source source);
+  void StreamingSongsDownloaded(const QStringList &paths);
+  void PlaylistDownload();
+  void DownloadStreamingSongs(const SongList &songs);
+  void ShowYouTubeMusicDownloads();
+  void PlayPlaylistRow(const int row);
+  void ApplyStreamMetadata(const Song &song);
 
   void ReloadSettings();
   void ReloadAllSettings();
@@ -366,6 +372,9 @@ class MainWindow : public QMainWindow, public PlatformInterface {
 #ifdef HAVE_TIDAL
   StreamingTabsView *tidal_view_;
 #endif
+#ifdef HAVE_YOUTUBEMUSIC
+  StreamingTabsView *youtubemusic_view_;
+#endif
 #ifdef HAVE_SPOTIFY
   StreamingTabsView *spotify_view_;
 #endif
@@ -403,6 +412,7 @@ class MainWindow : public QMainWindow, public PlatformInterface {
   QAction *playlistitem_actions_separator_;
   QAction *playlist_rescan_songs_;
   QAction *playlist_fetch_metadata_;
+  QAction *playlist_download_;
 
   QModelIndex playlist_menu_index_;
 

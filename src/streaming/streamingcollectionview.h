@@ -54,11 +54,13 @@ class StreamingCollectionView : public AutoExpandingTreeView {
  public:
   explicit StreamingCollectionView(QWidget *parent = nullptr);
 
-  void Init(const SharedPtr<CollectionBackend> collection_backend, CollectionModel *collection_model, const bool favorite = false);
+  void Init(const SharedPtr<CollectionBackend> collection_backend, CollectionModel *collection_model, const bool favorite = false, const bool downloadable = false, const bool expandable = false);
 
   // Returns Songs currently selected in the collection view.
   // Please note that the selection is recursive meaning that if for example an album is selected this will return all of it's songs.
   SongList GetSelectedSongs() const;
+  // Songs for an arbitrary row (used when a row is expanded rather than selected).
+  SongList GetSongsForIndex(const QModelIndex &index) const;
 
   void SetFilter(CollectionFilterWidget *filter);
 
@@ -83,6 +85,10 @@ class StreamingCollectionView : public AutoExpandingTreeView {
 
  Q_SIGNALS:
   void GetSongs();
+  void DownloadSongsSignal(const SongList &songs);
+  void PlaySongsSignal(const SongList &songs, const bool replace, const bool play);
+  void QueueSongsSignal(const SongList &songs, const bool next);
+  void OpenSongsInNewPlaylistSignal(const SongList &songs);
   void TotalSongCountUpdated_();
   void TotalArtistCountUpdated_();
   void TotalAlbumCountUpdated_();
@@ -102,6 +108,9 @@ class StreamingCollectionView : public AutoExpandingTreeView {
   void AddToPlaylistEnqueueNext();
   void OpenInNewPlaylist();
   void RemoveSelectedSongs();
+  void Download();
+  void PlaySelected();
+  void AddSelected();
 
  private:
   void RecheckIsEmpty();
@@ -128,6 +137,11 @@ class StreamingCollectionView : public AutoExpandingTreeView {
   QAction *add_to_playlist_enqueue_next_;
   QAction *open_in_new_playlist_;
   QAction *remove_songs_;
+  QAction *download_;
+  QAction *play_container_;
+  QAction *add_container_;
+  bool downloadable_;
+  bool expandable_;
 
   bool is_in_keyboard_search_;
 

@@ -38,6 +38,10 @@
 #include "core/iconloader.h"
 #include "core/settings.h"
 #include "playlist/playlist.h"
+#include "playlist/playlistitem.h"
+#include <QAction>
+#include <QMenu>
+
 #include "playlist/playlistdelegates.h"
 #include "playlist/playlistmanager.h"
 #include "queue.h"
@@ -55,6 +59,10 @@ QueueView::QueueView(QWidget *parent)
 
   ui_->setupUi(this);
   ui_->list->setItemDelegate(new QueuedItemDelegate(this, 0));
+  ui_->list->setContextMenuPolicy(Qt::CustomContextMenu);
+  QObject::connect(ui_->list, &QWidget::customContextMenuRequested, this, &QueueView::ShowContextMenu);
+  // activated() covers both double click and Enter/Return.
+  QObject::connect(ui_->list, &QAbstractItemView::activated, this, &QueueView::PlayQueuedItem);
 
   // Set icons on buttons
   ui_->move_down->setIcon(IconLoader::Load(u"go-down"_s));
@@ -77,6 +85,65 @@ QueueView::QueueView(QWidget *parent)
 
 QueueView::~QueueView() {
   delete ui_;
+}
+
+QTreeView *QueueView::view() const {
+
+  return ui_->list;
+
+}
+
+void QueueView::PlayQueuedItem(const QModelIndex &index) {
+
+  Playlist *playlist = current_playlist_;
+  if (!playlist && playlist_manager_) playlist = playlist_manager_->current();
+  if (!playlist || !index.isValid()) return;
+
+  const QModelIndex playlist_index = playlist->queue()->mapToSource(index);
+  if (!playlist_index.isValid()) return;
+
+  Q_EMIT PlayRow(playlist_index.row());
+
+}
+
+SongList QueueView::SelectedSongs() const {
+
+  SongList songs;
+
+  // current_playlist_ is set by CurrentPlaylistChanged(), but do not depend on it
+  // being set yet when the user is quick with the context menu.
+  Playlist *playlist = current_playlist_;
+  if (!playlist && playlist_manager_) playlist = playlist_manager_->current();
+  if (!playlist) return songs;
+
+  const QModelIndexList selected_rows = ui_->list->selectionModel()->selectedRows();
+  for (const QModelIndex &queue_index : selected_rows) {
+    const QModelIndex playlist_index = playlist->queue()->mapToSource(queue_index);
+    if (!playlist_index.isValid()) continue;
+    PlaylistItemPtr item = playlist->item_at(playlist_index.row());
+    if (!item) continue;
+    const Song song = item->EffectiveMetadata();
+    // Playlist items restored from a playlist file often carry only the url, so do not
+    // require song_id here - the service resolves the id from the url when needed.
+    if (!song.is_stream_service() || !song.url().isValid()) continue;
+    songs << song;
+  }
+
+  return songs;
+
+}
+
+void QueueView::ShowContextMenu(const QPoint &pos) {
+
+  const SongList songs = SelectedSongs();
+  if (songs.isEmpty()) return;
+
+  QMenu menu(this);
+  QAction *download = menu.addAction(IconLoader::Load(u"document-save"_s), tr("Download"));
+  if (menu.exec(ui_->list->viewport()->mapToGlobal(pos)) == download) {
+    Q_EMIT DownloadSongs(songs);
+  }
+
 }
 
 void QueueView::SetPlaylistManager(SharedPtr<PlaylistManager> playlist_manager) {

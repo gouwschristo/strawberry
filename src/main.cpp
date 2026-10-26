@@ -47,6 +47,8 @@
 #include <QObject>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QSslConfiguration>
+#include <QSslSocket>
 #include <QSysInfo>
 #include <QLibraryInfo>
 #include <QFileDevice>
@@ -151,6 +153,14 @@ int main(int argc, char *argv[]) {
   g_set_application_name("Strawberry");
   g_setenv("PULSE_PROP_application.icon_name", "strawberry", TRUE);
   g_setenv("PULSE_PROP_media.role", "music", TRUE);
+
+  // Warm up Qt's SSL stack once, single threaded, before any worker thread or
+  // playback starts. QNetworkRequest::sslConfiguration() lazily decodes the CA
+  // bundle on first use; doing that concurrently from several threads crashes
+  // inside OpenSSL's provider enumeration (OSSL_DECODER_do_all_provided).
+  if (QSslSocket::supportsSsl()) {
+    (void)QSslConfiguration::defaultConfiguration().caCertificates();
+  }
 
   RegisterMetaTypes();
 

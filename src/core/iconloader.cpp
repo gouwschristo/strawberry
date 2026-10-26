@@ -107,7 +107,10 @@ QIcon IconLoader::Load(const QString &name, const bool system_icon, const int fi
       }
     }
     if (!ret.isNull()) return ret;
-    qLog(Warning) << "Couldn't load icon" << name << "from custom icons.";
+    // Not an error: the custom icon directory is normally a partial override, so
+    // most icons legitimately fall through to the system theme or built-in artwork.
+    // Logging this as a warning produced ~210 lines of noise on every startup.
+    qLog(Debug) << "Couldn't load icon" << name << "from custom icons.";
   }
 
   if (system_icon && system_icons_) {

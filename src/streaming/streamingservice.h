@@ -22,6 +22,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 #include <QIcon>
 
@@ -59,6 +60,14 @@ class StreamingService : public QObject {
   virtual bool authenticated() const { return false; }
   virtual int Search(const QString &query, const SearchType type) { Q_UNUSED(query); Q_UNUSED(type); return 0; }
   virtual void CancelSearch() {}
+  // Services that can resolve the tracks of an album/artist row (YouTube Music)
+  // override this; the views then load the tracks on double click instead of
+  // adding an unplayable placeholder row to the playlist.
+  virtual bool supports_album_tracks() const { return false; }
+
+  // Services that can save a song to disk expose a "Download" entry in the views.
+  virtual bool supports_downloads() const { return false; }
+
   virtual bool show_progress() const { return true; }
   virtual bool enable_refresh_button() const { return true; }
 
@@ -80,6 +89,13 @@ class StreamingService : public QObject {
   virtual void GetAlbums() {}
   virtual void GetSongs() {}
   virtual void ResetArtistsRequest() {}
+  virtual void GetAlbumTracks(const Song &album) { Q_UNUSED(album); }
+  virtual void GetArtistTracks(const Song &artist) { Q_UNUSED(artist); }
+  // Lazy tree expansion: load the children of a container row into the model
+  // backing that view (increments are per service, no-op by default).
+  virtual void ExpandAlbumRow(const Song &album, const bool artists_view) { Q_UNUSED(album); Q_UNUSED(artists_view); }
+  virtual void ExpandArtistRow(const Song &artist) { Q_UNUSED(artist); }
+  virtual void DownloadSongs(const SongList &songs) { Q_UNUSED(songs); }
   virtual void ResetAlbumsRequest() {}
   virtual void ResetSongsRequest() {}
 
@@ -98,6 +114,10 @@ class StreamingService : public QObject {
 
   void ShowErrorDialog(const QString &error);
   void Results(const SongMap &songs, const QString &error);
+  // Emitted for both album rows and artist rows when their tracks are resolved.
+  void AlbumTracksLoaded(const SongList &songs, const QString &error);
+  // Emitted when a service saved songs to disk, so the collection can pick them up.
+  void SongsDownloaded(const QStringList &paths);
   void UpdateStatus(const QString &text);
   void ProgressSetMaximum(const int max);
   void UpdateProgress(const int max);

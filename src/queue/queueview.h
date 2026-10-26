@@ -26,10 +26,13 @@
 
 #include <QObject>
 #include <QWidget>
+
+#include "core/song.h"
 #include <QString>
 
 #include "includes/shared_ptr.h"
 
+class QTreeView;
 class Playlist;
 class PlaylistManager;
 class Ui_QueueView;
@@ -38,13 +41,22 @@ class QueueView : public QWidget {
   Q_OBJECT
 
  public:
+  QTreeView *view() const;
+  SongList SelectedSongs() const;
+  // Double click / Enter on a queued row: play that track.
+  void PlayQueuedItem(const QModelIndex &index);
   explicit QueueView(QWidget *parent = nullptr);
   ~QueueView() override;
 
   void SetPlaylistManager(SharedPtr<PlaylistManager> playlist_manager);
   void ReloadSettings();
 
+ Q_SIGNALS:
+  void DownloadSongs(const SongList &songs);
+  void PlayRow(const int row);
+
  private Q_SLOTS:
+  void ShowContextMenu(const QPoint &pos);
   void CurrentPlaylistChanged(Playlist *playlist);
   void PlaylistDestroyed();
   void UpdateButtonState();

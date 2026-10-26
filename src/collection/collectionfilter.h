@@ -42,6 +42,11 @@ class CollectionFilter : public QSortFilterProxyModel {
   void SetFilterString(const QString &filter_string);
   QString filter_string() const { return filter_string_; }
 
+ public:
+  // Containers stay expandable while still empty (streaming album/artist rows fetch their
+  // children on demand); the proxy would otherwise report them as leaf rows.
+  bool hasChildren(const QModelIndex &parent = QModelIndex()) const override;
+
  protected:
   bool filterAcceptsRow(const int source_row, const QModelIndex &source_parent) const override;
   QMimeData *mimeData(const QModelIndexList &indexes) const override;
