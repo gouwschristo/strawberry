@@ -96,6 +96,30 @@ QStringList TextRuns(const QJsonValue &value) {
 
 }
 
+void CollectObjectsWithKey(const QJsonValue &value, const QString &key, QList<QJsonObject> &objects);
+
+// Album pages put "Album • 2004" in the header subtitle - except when that slot carries the
+// label instead ("Album • Alpha Portal"), so only a four digit run counts as a year.
+int AlbumYearFromHeader(const QJsonObject &json_object) {
+
+  static const QRegularExpression year_re(u"^\\d{4}$"_s);
+
+  QList<QJsonObject> headers;
+  CollectObjectsWithKey(json_object, u"musicResponsiveHeaderRenderer"_s, headers);
+  for (const QJsonObject &header : std::as_const(headers)) {
+    const QJsonArray runs = header[u"subtitle"_s].toObject()[u"runs"_s].toArray();
+    for (const QJsonValue &run : runs) {
+      const QString text = run.toObject()[u"text"_s].toString().trimmed();
+      if (!year_re.match(text).hasMatch()) continue;
+      const int year = text.toInt();
+      if (year > 1000) return year;
+    }
+  }
+
+  return -1;
+
+}
+
 void CollectObjectsWithKey(const QJsonValue &value, const QString &key, QList<QJsonObject> &objects) {
 
   if (value.isObject()) {
@@ -530,6 +554,8 @@ void YouTubeMusicRequest::ParseJson(const QJsonObject &json_object) {
   QList<QJsonObject> items;
   CollectItems(json_object, items, type_ == Type::AlbumSongs || type_ == Type::ArtistSongs);
 
+  const int album_year = type_ == Type::AlbumSongs ? AlbumYearFromHeader(json_object) : -1;
+
   for (const QJsonObject &item : items) {
 
     Song song;
@@ -581,6 +607,8 @@ void YouTubeMusicRequest::ParseJson(const QJsonObject &json_object) {
       // page lists its tracks in order, so number them here. Downloads use it for
       // the "NN - Title" filename.
       if (song.track() <= 0) song.set_track(static_cast<int>(songs_.count()) + 1);
+      // The release year is a property of the album, not of the track row.
+      if (album_year > 0 && song.year() <= 0) song.set_year(album_year);
       // Track rows on an album page only carry title + artist + duration, so fill
       // in the album context from the row the user activated.
       if (song.album().isEmpty() && !album_source_.album().isEmpty()) song.set_album(album_source_.album());

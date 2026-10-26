@@ -107,6 +107,11 @@ void YouTubeMusicDownloadRequest::Process() {
          << QStringLiteral("%1:(?P<track_number>.*)").arg(song_.track());
   }
 
+  // YouTube Music knows the album's release year; yt-dlp writes it as the date tag.
+  // "release_year,release_date>%Y|" falls back to the release date, and to empty when
+  // neither exists, so a missing year never writes the literal "NA" into the tag.
+  args << u"--parse-metadata"_s << u"%(release_year,release_date>%Y|)s:(?P<meta_date>.*)"_s;
+
   if (!cookie_path.isEmpty()) args << u"--cookies"_s << cookie_path;
 
   args << u"--output"_s << output_template

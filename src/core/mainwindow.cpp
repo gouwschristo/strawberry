@@ -3671,6 +3671,7 @@ void MainWindow::ApplyStreamMetadata(const Song &song) {
       merged.set_albumartist(song.artist());
     }
     if (!song.album().isEmpty()) merged.set_album(song.album());
+    if (song.year() > 0) merged.set_year(song.year());
 
     qLog(Info) << "Playlist row" << row << "filled in from the stream:" << merged.artist() << "-" << merged.title();
     playlist->UpdateItemMetadata(row, item, merged, true);

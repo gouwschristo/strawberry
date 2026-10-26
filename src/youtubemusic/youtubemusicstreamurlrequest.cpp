@@ -89,7 +89,7 @@ void YouTubeMusicStreamURLRequest::Process() {
        << u"--print"_s << u"urls"_s
        // Title/artist/album in one line (unit separator, so values may contain tabs):
        // used to fill in playlist rows that were created from a bare url.
-       << u"--print"_s << u"%(title)s\u001f%(artist)s\u001f%(album)s"_s
+       << u"--print"_s << u"%(title)s\u001f%(artist)s\u001f%(album)s\u001f%(release_year|)s"_s
        << u"-f"_s << u"bestaudio[protocol^=m3u8]/best[protocol^=m3u8]/bestaudio/best"_s;
   // Options must come before the "--" separator, everything after it is treated as a url.
   if (!cookie_path.isEmpty()) args << u"--cookies"_s << cookie_path;
@@ -138,6 +138,8 @@ void YouTubeMusicStreamURLRequest::ProcessFinished(const int exit_code, const QP
       metadata.set_album(parts.value(2).trimmed());
       metadata.set_albumartist(parts.value(1).trimmed());
       metadata.set_song_id(video_id_);
+      const int year = parts.value(3).trimmed().toInt();
+      if (year > 1000) metadata.set_year(year);
       if (!metadata.title().isEmpty()) Q_EMIT MetadataFound(media_url_, metadata);
       continue;
     }
