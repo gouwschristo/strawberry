@@ -22,6 +22,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QPushButton;
 class QLineEdit;
 class QLabel;
 class QPlainTextEdit;
@@ -38,17 +39,21 @@ class YouTubeMusicSettingsPage : public SettingsPage {
 
   void Load() override;
   void Save() override;
+  void SignIn();
+  void ImportCookies();
+  void UpdateLoginState();
 
  private Q_SLOTS:
   void CookieChanged();
 
  private:
-  void UpdateLoginState();
-
   SharedPtr<YouTubeMusicService> service_;
 
   QCheckBox *checkbox_enabled_;
   QPlainTextEdit *textedit_cookie_;
+  QComboBox *combobox_cookies_browser_;
+  QPushButton *button_sign_in_;
+  QPushButton *button_import_cookies_;
   QLabel *label_login_state_;
   QCheckBox *checkbox_auto_refresh_cookies_;
   QLineEdit *lineedit_cookies_script_;

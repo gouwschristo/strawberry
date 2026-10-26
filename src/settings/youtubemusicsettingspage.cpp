@@ -10,6 +10,10 @@
 
 #include "config.h"
 
+#include <QDesktopServices>
+#include <QUrl>
+#include <QApplication>
+#include <QPushButton>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -37,6 +41,9 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
       service_(service),
       checkbox_enabled_(new QCheckBox(tr("Enable YouTube Music"), this)),
       textedit_cookie_(new QPlainTextEdit(this)),
+      combobox_cookies_browser_(new QComboBox(this)),
+      button_sign_in_(new QPushButton(tr("Sign in to YouTube Music..."), this)),
+      button_import_cookies_(new QPushButton(tr("Import cookies now"), this)),
       label_login_state_(new QLabel(this)),
       checkbox_auto_refresh_cookies_(new QCheckBox(tr("Refresh the cookies automatically when the session expires"), this)),
       lineedit_cookies_script_(new QLineEdit(this)),
@@ -57,15 +64,35 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   QVBoxLayout *layout_login = new QVBoxLayout(group_login);
 
   QLabel *label_instructions = new QLabel(
-      tr("YouTube Music has no public API, so the app authenticates with the cookies of a browser "
-         "session. Log in to <a href=\"https://music.youtube.com\">music.youtube.com</a> in your browser, "
-         "open the developer tools, and copy the <b>Cookie</b> request header (or just the "
-         "<b>SAPISID</b> and <b>__Secure-3PAPISID</b> values) here. Without cookies, searching and "
-         "playing songs works, but your library, liked artists and liked albums won't be listed."),
+      tr("YouTube Music has no public API, so the app uses the cookie session of a browser. "
+         "Sign in to <a href=\"https://music.youtube.com\">music.youtube.com</a> in that browser, then "
+         "press <b>Import cookies now</b>. Without a session, searching and playing works, but your "
+         "library, liked artists and liked albums won't be listed. You can still paste a cookie header below."),
       group_login);
   label_instructions->setWordWrap(true);
   label_instructions->setOpenExternalLinks(true);
   layout_login->addWidget(label_instructions);
+
+  combobox_cookies_browser_->addItem(tr("Chrome"), u"chrome"_s);
+  combobox_cookies_browser_->addItem(tr("Chromium"), u"chromium"_s);
+  combobox_cookies_browser_->addItem(tr("Brave"), u"brave"_s);
+  combobox_cookies_browser_->addItem(tr("Microsoft Edge"), u"edge"_s);
+  combobox_cookies_browser_->addItem(tr("Firefox"), u"firefox"_s);
+  combobox_cookies_browser_->addItem(tr("Opera"), u"opera"_s);
+  combobox_cookies_browser_->addItem(tr("Vivaldi"), u"vivaldi"_s);
+  combobox_cookies_browser_->addItem(tr("Whale"), u"whale"_s);
+  combobox_cookies_browser_->setToolTip(tr("Browser to read the session cookies from. Firefox needs no keyring; "
+                                           "for Chromium browsers append +gnomekeyring or +kwallet, and a profile "
+                                           "with :ProfileName."));
+  QFormLayout *layout_browser = new QFormLayout();
+  layout_browser->addRow(tr("Read cookies from:"), combobox_cookies_browser_);
+  layout_login->addLayout(layout_browser);
+
+  QHBoxLayout *layout_buttons = new QHBoxLayout();
+  layout_buttons->addWidget(button_sign_in_);
+  layout_buttons->addWidget(button_import_cookies_);
+  layout_buttons->addStretch();
+  layout_login->addLayout(layout_buttons);
 
   textedit_cookie_->setPlaceholderText(u"SAPISID=...; __Secure-3PAPISID=..."_s);
   textedit_cookie_->setFixedHeight(70);
@@ -119,6 +146,8 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   layout->addStretch();
 
   QObject::connect(textedit_cookie_, &QPlainTextEdit::textChanged, this, &YouTubeMusicSettingsPage::CookieChanged);
+  QObject::connect(button_sign_in_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignIn);
+  QObject::connect(button_import_cookies_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::ImportCookies);
 
   Load();
 
@@ -136,6 +165,10 @@ void YouTubeMusicSettingsPage::Load() {
   spinbox_search_limit_->setValue(s.value(QLatin1String(YouTubeMusicSettings::kSearchLimit), 50).toInt());
   checkbox_remove_remastered_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), true).toBool());
   checkbox_auto_refresh_cookies_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), true).toBool());
+  const QString browser = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
+  const int browser_index = combobox_cookies_browser_->findData(browser);
+  if (browser_index >= 0) combobox_cookies_browser_->setCurrentIndex(browser_index);
+  UpdateLoginState();
   lineedit_download_dir_->setText(s.value(QLatin1String(YouTubeMusicSettings::kDownloadDir),
                                           QStringLiteral("%1/Music/YouTubeMusic").arg(QDir::homePath())).toString());
   combobox_download_format_->setCurrentIndex(combobox_download_format_->findData(s.value(QLatin1String(YouTubeMusicSettings::kDownloadFormat), u"opus"_s).toString()));
@@ -160,6 +193,7 @@ void YouTubeMusicSettingsPage::Save() {
   s.setValue(QLatin1String(YouTubeMusicSettings::kSearchLimit), spinbox_search_limit_->value());
   s.setValue(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), checkbox_remove_remastered_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), checkbox_auto_refresh_cookies_->isChecked());
+  s.setValue(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), combobox_cookies_browser_->currentData().toString());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadDir), lineedit_download_dir_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadFormat), combobox_download_format_->currentData().toString());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadEmbedThumbnail), checkbox_embed_thumbnail_->isChecked());
@@ -193,5 +227,36 @@ void YouTubeMusicSettingsPage::UpdateLoginState() {
   }
 
   label_login_state_->setText(tr("Cookies set. Your library will be loaded when the settings are saved."));
+
+}
+
+void YouTubeMusicSettingsPage::SignIn() {
+
+  // Google refuses its sign-in flow inside embedded browsers, so the login happens in the
+  // real browser and the cookies are imported from there.
+  QDesktopServices::openUrl(QUrl(u"https://music.youtube.com/"_s));
+  label_login_state_->setText(tr("Sign in in the browser, then press \"Import cookies now\"."));
+
+}
+
+void YouTubeMusicSettingsPage::ImportCookies() {
+
+  if (!service_) return;
+
+  const QString browser = combobox_cookies_browser_->currentData().toString();
+  const QString old_text = button_import_cookies_->text();
+  button_import_cookies_->setEnabled(false);
+  button_import_cookies_->setText(tr("Importing..."));
+  QApplication::processEvents();
+
+  QString error;
+  const bool changed = service_->ImportCookiesFromBrowser(browser, &error);
+
+  button_import_cookies_->setEnabled(true);
+  button_import_cookies_->setText(old_text);
+
+  if (changed) textedit_cookie_->setPlainText(service_->cookie());
+  label_login_state_->setText(changed ? tr("Cookies imported from %1.").arg(browser)
+                                      : (error.isEmpty() ? tr("The cookies did not change.") : error));
 
 }

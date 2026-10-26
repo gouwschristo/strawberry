@@ -22,6 +22,10 @@ constexpr char kSearchLimit[] = "searchlimit";
 constexpr char kRemoveRemastered[] = "remove_remastered";
 constexpr char kAutoRefreshCookies[] = "auto_refresh_cookies";
 constexpr char kCookiesScript[] = "cookies_script";
+// Browser (and optional profile / keyring) yt-dlp reads the session cookies from:
+// "chrome", "firefox", "brave", "chromium", "edge", "chrome+gnomekeyring:Profile 1", ...
+constexpr char kCookiesBrowser[] = "cookies_browser";
+constexpr char kCookiesImportedAt[] = "cookies_imported_at";   // ISO date of the last import
 constexpr char kDownloadDir[] = "download_dir";
 constexpr char kDownloadFormat[] = "download_format";
 constexpr char kDownloadEmbedThumbnail[] = "download_embed_thumbnail";

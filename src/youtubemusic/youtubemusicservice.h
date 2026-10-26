@@ -81,6 +81,7 @@ class YouTubeMusicService : public StreamingService {
   bool supports_downloads() const override { return true; }
   bool enabled() const { return enabled_; }
   QString cookie() const { return cookie_; }
+  QString cookies_browser() const { return cookies_browser_; }
   // Writes the stored cookie header to a Netscape-format cookies file and returns its
   // path (empty when there is no cookie). yt-dlp needs it to get past "sign in to confirm
   // you're not a bot". The file must outlive the yt-dlp process.
@@ -103,6 +104,12 @@ class YouTubeMusicService : public StreamingService {
   // Re-reads the YouTube Music cookies from the browser (via the helper script) and
   // loads them into the running session. Returns true when the cookie changed.
   bool RefreshCookies();
+
+  // Reads the session cookies out of a browser with yt-dlp's importer (brave, chrome,
+  // chromium, edge, firefox, opera, safari, vivaldi, whale - optionally +KEYRING and
+  // :PROFILE) and stores them. Returns true when the stored cookie changed.
+  bool ImportCookiesFromBrowser(const QString &browser, QString *error = nullptr);
+
 
   uint GetStreamURL(const QUrl &url, QString &error);
 
@@ -202,6 +209,7 @@ class YouTubeMusicService : public StreamingService {
   bool download_embed_thumbnail_;
   bool auto_refresh_cookies_;
   QString cookies_script_;
+  QString cookies_browser_;
 
   int pending_search_id_;
   QString pending_search_text_;

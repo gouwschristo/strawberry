@@ -1086,6 +1086,7 @@ MainWindow::MainWindow(Application *app,
 
 
 
+
   // This connection must be done after the playlists have been initialized.
   QObject::connect(this, &MainWindow::StopAfterToggled, osd_, &OSDBase::StopAfterToggle);
 

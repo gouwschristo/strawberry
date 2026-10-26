@@ -186,6 +186,7 @@ void YouTubeMusicService::ReloadSettings() {
                           QStringLiteral("%1/Music/YouTubeMusic").arg(QDir::homePath())).toString();
   download_format_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadFormat), u"opus"_s).toString();
   download_embed_thumbnail_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadEmbedThumbnail), true).toBool();
+  cookies_browser_ = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
   cookies_script_ = s.value(QLatin1String(YouTubeMusicSettings::kCookiesScript),
                             QStringLiteral("%1/Projects/scripts/strawberry-ytm-cookies.py").arg(QDir::homePath())).toString();
   s.endGroup();
@@ -200,9 +201,106 @@ bool YouTubeMusicService::authenticated() const {
 
 }
 
+bool YouTubeMusicService::ImportCookiesFromBrowser(const QString &browser, QString *error) {
+
+  const QString ytdlp = ytdlp_path_.isEmpty() ? u"yt-dlp"_s : ytdlp_path_;
+  if (browser.isEmpty()) {
+    if (error) *error = tr("No browser selected.");
+    return false;
+  }
+
+  QTemporaryFile jar;
+  if (!jar.open()) {
+    if (error) *error = tr("Could not create a temporary file.");
+    return false;
+  }
+  const QString jar_path = jar.fileName();
+  // yt-dlp creates the jar; it refuses an existing (empty) file as "not a Netscape cookie
+  // file", so hand it the name only.
+  jar.remove();
+
+  const QString old_cookie = cookie_;
+
+  // yt-dlp both decrypts the browser store (any supported browser, optional keyring and
+  // profile) and dumps the jar; one video is enough to make it do the work.
+  QProcess process;
+  process.setProgram(ytdlp);
+  process.setArguments({
+    u"--no-warnings"_s,
+    u"--skip-download"_s,
+    u"--cookies-from-browser"_s, browser,
+    u"--cookies"_s, jar_path,
+    u"--print"_s, u"id"_s,
+    u"--"_s, u"https://music.youtube.com/watch?v=dQw4w9WgXcQ"_s,
+  });
+  process.setProcessChannelMode(QProcess::MergedChannels);
+  process.start();
+  if (!process.waitForFinished(60000)) {
+    process.kill();
+    if (error) *error = tr("Reading cookies from %1 timed out.").arg(browser);
+    return false;
+  }
+  const QString output = QString::fromLocal8Bit(process.readAll()).trimmed();
+  if (process.exitCode() != 0) {
+    if (error) *error = output.isEmpty() ? tr("yt-dlp could not read cookies from %1.").arg(browser) : output;
+    return false;
+  }
+
+  // Keep only the cookies the YouTube Music session needs, for the youtube.com domains.
+  QFile file(jar_path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    if (error) *error = tr("Could not read the exported cookies.");
+    return false;
+  }
+  QStringList parts;
+  int count = 0;
+  while (!file.atEnd()) {
+    const QString line = QString::fromUtf8(file.readLine()).trimmed();
+    if (line.isEmpty() || line.startsWith(u'#')) continue;
+    const QStringList fields = line.split(u'\t');
+    if (fields.count() < 7) continue;
+    const QString domain = fields.at(0);
+    const QString name = fields.at(5);
+    const QString value = fields.mid(6).join(u'\t');
+    if (!domain.contains(u"youtube"_s)) continue;
+    parts << QStringLiteral("%1=%2").arg(name, value);
+    ++count;
+  }
+
+  if (count == 0) {
+    if (error) *error = tr("No YouTube cookies found in %1. Sign in to music.youtube.com there first.").arg(browser);
+    return false;
+  }
+
+  cookie_ = parts.join(u"; "_s);
+  {
+    Settings s;
+    s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+    s.setValue(YouTubeMusicSettings::kCookie, cookie_);
+    s.setValue(YouTubeMusicSettings::kCookiesBrowser, browser);
+    s.setValue(YouTubeMusicSettings::kCookiesImportedAt, QDateTime::currentDateTime().toString(Qt::ISODate));
+    s.endGroup();
+    s.sync();
+  }
+
+  qLog(Info) << "YouTubeMusic: imported" << count << "cookie(s) from" << browser;
+  if (cookie_ == old_cookie && error) *error = tr("The cookies did not change.");
+  return cookie_ != old_cookie;
+
+}
+
+
 bool YouTubeMusicService::RefreshCookies() {
 
   if (!auto_refresh_cookies_) return false;
+
+  // Preferred path: read the session straight out of the browser (brave, chrome, chromium,
+  // edge, firefox, opera, safari, vivaldi, whale). No keyring script, no Chrome-only code.
+  if (!cookies_browser_.isEmpty()) {
+    if (ImportCookiesFromBrowser(cookies_browser_)) return true;
+    qLog(Warning) << "YouTubeMusic: browser import failed, falling back to the helper script";
+  }
+
   if (cookies_script_.isEmpty() || !QFile::exists(cookies_script_)) {
     qLog(Warning) << "YouTubeMusic: cookie refresh script not found:" << cookies_script_;
     return false;
