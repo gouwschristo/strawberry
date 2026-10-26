@@ -191,8 +191,8 @@ class YouTubeMusicService : public StreamingService {
   void StartNextDownloadContainer();
   void StartNextExpansion();
   void ArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error);
-  void ArtistAlbumTracksReceived(const int id, const SongMap &songs, const QString &error);
   void StartNextArtistAlbumTracks();
+  void FinishArtistTrackWalk();
 
   const SharedPtr<TaskManager> task_manager_;
   const SharedPtr<NetworkAccessManager> network_;
@@ -268,6 +268,11 @@ class YouTubeMusicService : public StreamingService {
   SongList artist_tracks_albums_;
   SongList artist_tracks_collected_;
   YouTubeMusicRequestPtr artist_walk_request_;
+  // One album per request; a few run at a time and the results are kept per album so the
+  // collected order stays the album order.
+  QHash<int, YouTubeMusicRequest *> artist_walk_requests_;   // parented, deleteLater'd
+  QVector<SongList> artist_walk_results_;
+  int artist_walk_next_ = 0;
   YouTubeMusicDownloadRequest *download_request_;
   int download_task_id_;
 };

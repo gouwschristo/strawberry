@@ -926,6 +926,9 @@ void YouTubeMusicService::GetAllArtistTracks(const Song &artist) {
 
   artist_tracks_albums_.clear();
   artist_tracks_collected_.clear();
+  artist_walk_requests_.clear();
+  artist_walk_results_.clear();
+  artist_walk_next_ = 0;
 
   artist_walk_request_.reset(new YouTubeMusicRequest(this, network_, this));
   QObject::connect(&*artist_walk_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistAlbumsReceived);
@@ -950,6 +953,7 @@ void YouTubeMusicService::ArtistAlbumsReceived(const int id, const SongMap &song
     if (!album.album_id().isEmpty()) artist_tracks_albums_ << album;
   }
 
+  artist_walk_results_.resize(artist_tracks_albums_.count());
   qLog(Info) << "YouTubeMusic: collecting tracks from" << artist_tracks_albums_.count() << "album(s)";
   StartNextArtistAlbumTracks();
 
@@ -957,37 +961,63 @@ void YouTubeMusicService::ArtistAlbumsReceived(const int id, const SongMap &song
 
 void YouTubeMusicService::StartNextArtistAlbumTracks() {
 
-  if (artist_tracks_albums_.isEmpty()) {
-    Q_EMIT SongsUpdateStatus(QString());
-    Q_EMIT AlbumTracksLoaded(artist_tracks_collected_, QString());
-    return;
+  // Three albums in flight at a time: fast enough for a 25 album artist to feel instant,
+  // and still polite to the API. Results are stored per album so the order is preserved.
+  constexpr int kMaxConcurrentAlbums = 3;
+
+  while (artist_walk_requests_.size() < kMaxConcurrentAlbums && artist_walk_next_ < artist_tracks_albums_.count()) {
+    const int index = artist_walk_next_++;
+    const Song album = artist_tracks_albums_.at(index);
+
+    auto *request = new YouTubeMusicRequest(this, network_, this);
+    artist_walk_requests_.insert(index, request);
+    QObject::connect(request, &YouTubeMusicRequest::Results, this,
+                     [this, index](const int id, const SongMap &songs, const QString &error) {
+                       Q_UNUSED(id);
+                       if (YouTubeMusicRequest *finished = artist_walk_requests_.take(index)) finished->deleteLater();
+                       if (error.isEmpty()) {
+                         SongList collected;
+                         for (const Song &song : songs) {
+                           if (!song.song_id().isEmpty()) collected << song;
+                         }
+                         artist_walk_results_[index] = collected;
+                       }
+                       StartNextArtistAlbumTracks();
+                     });
+    request->ProcessAlbum(album);
   }
 
-  const Song album = artist_tracks_albums_.takeFirst();
-  Q_EMIT SongsUpdateStatus(tr("Collecting tracks: %1 (%2 left)").arg(album.album()).arg(artist_tracks_albums_.count()));
+  const int remaining = artist_tracks_albums_.count() - artist_walk_next_ + artist_walk_requests_.size();
+  Q_EMIT SongsUpdateStatus(tr("Collecting tracks: %1 album(s) left").arg(std::max(0, remaining)));
 
-  artist_walk_request_.reset(new YouTubeMusicRequest(this, network_, this));
-  QObject::connect(&*artist_walk_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistAlbumTracksReceived);
-  artist_walk_request_->ProcessAlbum(album);
+  if (artist_walk_requests_.isEmpty() && artist_walk_next_ >= artist_tracks_albums_.count()) {
+    FinishArtistTrackWalk();
+  }
 
 }
 
-void YouTubeMusicService::ArtistAlbumTracksReceived(const int id, const SongMap &songs, const QString &error) {
+void YouTubeMusicService::FinishArtistTrackWalk() {
 
-  Q_UNUSED(id);
+  for (YouTubeMusicRequest *request : std::as_const(artist_walk_requests_)) {
+    if (request) request->deleteLater();
+  }
+  artist_walk_requests_.clear();
 
-  artist_walk_request_.reset();
-
-  if (error.isEmpty()) {
-    for (const Song &song : songs) {
-      if (song.song_id().isEmpty()) continue;
+  artist_tracks_collected_.clear();
+  for (const SongList &album_tracks : artist_walk_results_) {
+    for (const Song &song : album_tracks) {
       const bool duplicate = std::any_of(artist_tracks_collected_.cbegin(), artist_tracks_collected_.cend(),
                                          [&song](const Song &existing) { return existing.song_id() == song.song_id(); });
       if (!duplicate) artist_tracks_collected_ << song;
     }
   }
+  artist_walk_results_.clear();
+  artist_walk_next_ = 0;
 
-  StartNextArtistAlbumTracks();
+  qLog(Info) << "YouTubeMusic: collected" << artist_tracks_collected_.count() << "track(s) for the artist";
+
+  Q_EMIT SongsUpdateStatus(QString());
+  Q_EMIT AlbumTracksLoaded(artist_tracks_collected_, QString());
 
 }
 
