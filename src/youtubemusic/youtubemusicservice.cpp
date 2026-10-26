@@ -152,6 +152,7 @@ YouTubeMusicService::YouTubeMusicService(const SharedPtr<TaskManager> task_manag
 
   // Self-healing: collapse artist names that only differ by capitalisation.
   NormalizeArtistNames();
+  MergeCollaborationArtists();
 
   // YouTube rotates the session cookies hourly, and importing them takes a few seconds
   // (yt-dlp reads the browser store). Do that in the background shortly after start instead
@@ -1061,6 +1062,79 @@ QString YouTubeMusicService::WriteCookieFile(QTemporaryFile *file) const {
   qLog(Debug) << "YouTubeMusic: wrote" << file->fileName() << "for yt-dlp with" << cookie_.count(u'=') << "cookie(s)";
 
   return file->fileName();
+
+}
+
+
+void YouTubeMusicService::MergeCollaborationArtists() {
+
+  // The liked-artists shelf is the subscription list. YouTube Music also exposes collaboration
+  // *entities* ("The Chainsmokers & Coldplay", "Berg & Vermont (BR)"), which used to appear as
+  // extra artists. A collaboration is folded into a subscribed artist only when one of its parts
+  // is itself subscribed, so real band names ("Chase & Status", "Of Mice & Men") stay untouched.
+  QHash<QString, QString> subscribed;   // lower-case name -> canonical name
+  {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    // The liked-artists shelf is stored as rows without an album or a song; the songs table
+    // only lists artists of liked songs, which is not the subscription list.
+    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs "
+                             "WHERE coalesce(album_id, '') = '' AND coalesce(song_id, '') = '' AND artist <> ''"));
+    if (!q.Exec()) {
+      database_->ReportErrors(q);
+      return;
+    }
+    while (q.next()) {
+      const QString name = q.value(0).toString().trimmed();
+      if (!name.isEmpty() && !subscribed.contains(name.toLower())) subscribed.insert(name.toLower(), name);
+    }
+  }
+
+  if (subscribed.isEmpty()) return;
+
+  QHash<QString, QString> merges;   // collaboration name -> subscribed artist
+  {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs WHERE artist <> ''"));
+    if (!q.Exec()) return;
+    QStringList names;
+    while (q.next()) names << q.value(0).toString();
+    locker.unlock();
+
+    static const QRegularExpression split_re(uR"re(\s*(?:&|\bfeat\.?\b|\bx\b|,)\s*)re"_s, QRegularExpression::CaseInsensitiveOption);
+    for (const QString &name : std::as_const(names)) {
+      if (!split_re.match(name).hasMatch()) continue;
+      if (subscribed.contains(name.toLower())) continue;   // itself subscribed - leave alone
+      const QStringList parts = name.split(split_re, Qt::SkipEmptyParts);
+      for (const QString &part : parts) {
+        const QString candidate = part.trimmed();
+        const auto it = subscribed.constFind(candidate.toLower());
+        if (it == subscribed.cend()) continue;
+        merges.insert(name, it.value());
+        break;
+      }
+    }
+  }
+
+  if (merges.isEmpty()) {
+    qLog(Info) << "YouTubeMusic: no collaboration artists to fold";
+    return;
+  }
+
+  QMutexLocker locker(database_->Mutex());
+  QSqlDatabase db = database_->Connect();
+  for (auto it = merges.cbegin(); it != merges.cend(); ++it) {
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("UPDATE youtubemusic_artists_songs SET artist = ? WHERE artist = ?"));
+    q.addBindValue(it.value());
+    q.addBindValue(it.key());
+    if (!q.Exec()) database_->ReportErrors(q);
+  }
+
+  qLog(Info) << "YouTubeMusic: folded" << merges.count() << "collaboration artist(s) into subscribed artists";
 
 }
 

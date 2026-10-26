@@ -109,6 +109,9 @@ class YouTubeMusicService : public StreamingService {
   // Collapses artist names that differ only by case, so one artist is not split into
   // two containers in the browser.
   void NormalizeArtistNames();
+  // Folds a collaboration entity ("Rezz & PVRIS") into a subscribed artist when one of its
+  // parts is a subscribed artist, so the tree only shows artists the user follows.
+  void MergeCollaborationArtists();
   void RetryFailedDownloads();
   QString download_format() const { return download_format_; }
   bool download_embed_thumbnail() const { return download_embed_thumbnail_; }
