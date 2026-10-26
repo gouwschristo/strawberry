@@ -68,8 +68,19 @@ bool CollectionFilter::filterAcceptsRow(const int source_row, const QModelIndex 
   CollectionItem *item = model->IndexToItem(idx);
   if (!item) return false;
 
+  if (item->type == CollectionItem::Type::LoadingIndicator) return true;
+
+  // Containers and dividers used to be rejected outright, which left a filtered tree empty
+  // whenever the rows themselves are containers (an artist browser is nothing but artist and
+  // album rows): typing "Ast" hid "Astrix" instead of matching it.
   if (item->type != CollectionItem::Type::Song) {
-    return item->type == CollectionItem::Type::LoadingIndicator;
+    if (item->display_text.contains(filter_string_, Qt::CaseInsensitive)) return true;
+    // Keep a container visible when something inside it matches, so the path to a song is
+    // never filtered away.
+    for (int child_row = 0; child_row < item->children.count(); ++child_row) {
+      if (filterAcceptsRow(child_row, idx)) return true;
+    }
+    return false;
   }
 
   return item->metadata.is_valid() && filter_tree_ && filter_tree_->accept(item->metadata);
