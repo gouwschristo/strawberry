@@ -35,6 +35,7 @@
 #include "collection/collectionbackend.h"
 #include "collection/collectionmodel.h"
 #include "streaming/streamingservice.h"
+#include "constants/youtubemusicconstants.h"
 #include "constants/youtubemusicsettings.h"
 #include "youtubemusic/youtubemusicrequest.h"
 #include "youtubemusic/youtubemusicwalk.h"
@@ -191,7 +192,7 @@ void YouTubeMusicService::ReloadSettings() {
   prefetch_ = s.value(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), true).toBool();
   if (!prefetch_timer_) {
     prefetch_timer_ = new QTimer(this);
-    prefetch_timer_->setInterval(3 * 60 * 1000);
+    prefetch_timer_->setInterval(YouTubeMusicConstants::kPrefetchIntervalSeconds * 1000);
     QObject::connect(prefetch_timer_, &QTimer::timeout, this, &YouTubeMusicService::PrefetchNextArtist);
   }
   if (prefetch_) prefetch_timer_->start(); else prefetch_timer_->stop();
@@ -226,7 +227,7 @@ void YouTubeMusicService::RefreshCookiesInBackground() {
   s.endGroup();
 
   const QDateTime imported = QDateTime::fromString(imported_at, Qt::ISODate);
-  if (imported.isValid() && imported.secsTo(QDateTime::currentDateTime()) < 30 * 60) {
+  if (imported.isValid() && imported.secsTo(QDateTime::currentDateTime()) < YouTubeMusicConstants::kCookieFreshnessSeconds) {
     qLog(Debug) << "YouTubeMusic: cookies are fresh, skipping the background import";
     return;
   }
@@ -831,7 +832,7 @@ void YouTubeMusicService::StartIndexAlbumsWalk() {
 
   if (!index_walk_) index_walk_ = new YouTubeMusicWalk(this, this);
 
-  index_walk_->Run(index_albums_, 3,
+  index_walk_->Run(index_albums_, YouTubeMusicConstants::kAlbumConcurrency,
                    [this](const int index, const Song &album) -> YouTubeMusicRequest * {
                      Q_UNUSED(index);
                      auto *request = new YouTubeMusicRequest(this, network_, this);
@@ -916,7 +917,7 @@ void YouTubeMusicService::FinishIndexLibrary(const QString &error) {
 void YouTubeMusicService::LoadMoreArtists() {
 
   // The request layer defaults to 20 library pages, so "more" has to start above that.
-  page_budget_ = (page_budget_ > 0 ? page_budget_ : 20) + 10;
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : YouTubeMusicConstants::kLibraryPages) + YouTubeMusicConstants::kLibraryPagesPerLoadMore;
   qLog(Info) << "YouTubeMusic: loading more artists (page budget" << page_budget_ << ")";
   GetArtists();
 
@@ -924,7 +925,7 @@ void YouTubeMusicService::LoadMoreArtists() {
 
 void YouTubeMusicService::LoadMoreAlbums() {
 
-  page_budget_ = (page_budget_ > 0 ? page_budget_ : 20) + 10;
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : YouTubeMusicConstants::kLibraryPages) + YouTubeMusicConstants::kLibraryPagesPerLoadMore;
   qLog(Info) << "YouTubeMusic: loading more albums (page budget" << page_budget_ << ")";
   GetAlbums();
 
@@ -932,7 +933,7 @@ void YouTubeMusicService::LoadMoreAlbums() {
 
 void YouTubeMusicService::LoadMoreSongs() {
 
-  page_budget_ = (page_budget_ > 0 ? page_budget_ : 20) + 10;
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : YouTubeMusicConstants::kLibraryPages) + YouTubeMusicConstants::kLibraryPagesPerLoadMore;
   qLog(Info) << "YouTubeMusic: loading more songs (page budget" << page_budget_ << ")";
   GetSongs();
 
@@ -940,7 +941,7 @@ void YouTubeMusicService::LoadMoreSongs() {
 
 void YouTubeMusicService::LoadMoreSearch(const QString &query) {
 
-  page_budget_ = (page_budget_ > 0 ? page_budget_ : 5) + 5;
+  page_budget_ = (page_budget_ > 0 ? page_budget_ : YouTubeMusicConstants::kSearchPages) + YouTubeMusicConstants::kSearchPagesPerLoadMore;
   qLog(Info) << "YouTubeMusic: loading more search results for" << query;
   Q_EMIT Search(query, YouTubeMusicService::SearchType::Songs);
 
@@ -1514,7 +1515,7 @@ void YouTubeMusicService::StartArtistTracksWalk() {
 
   artist_walk_results_.resize(artist_tracks_albums_.count());
 
-  artist_walk_->Run(artist_tracks_albums_, 3,
+  artist_walk_->Run(artist_tracks_albums_, YouTubeMusicConstants::kAlbumConcurrency,
                     [this](const int index, const Song &album) -> YouTubeMusicRequest * {
                       Q_UNUSED(index);
                       auto *request = new YouTubeMusicRequest(this, network_, this);
