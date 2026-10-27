@@ -37,6 +37,7 @@
 #include "streaming/streamingservice.h"
 #include "constants/youtubemusicconstants.h"
 #include "constants/youtubemusicsettings.h"
+#include "youtubemusic/youtubemusicnameutils.h"
 #include "youtubemusic/youtubemusicrequest.h"
 #include "youtubemusic/youtubemusicwalk.h"
 #include "youtubemusic/youtubemusicstreamurlrequest.h"
@@ -1129,32 +1130,9 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     while (q.next()) names << q.value(0).toString();
     locker.unlock();
 
-    static const QRegularExpression split_re(uR"re(\s*(?:&|\bfeat\.?\b|\bx\b|,)\s*)re"_s, QRegularExpression::CaseInsensitiveOption);
     for (const QString &name : std::as_const(names)) {
-      if (!split_re.match(name).hasMatch()) continue;
-      if (subscribed.contains(name.toLower())) continue;   // itself subscribed - leave alone
-      // Prefer the longest subscribed name contained in this one: splitting would break a
-      // nested collaboration ("Becky Hill & Chase & Status" -> "Chase", "Status") and the row
-      // would then be dropped instead of folded.
-      QString best;
-      for (auto sub = subscribed.cbegin(); sub != subscribed.cend(); ++sub) {
-        if (sub.key().length() < 3) continue;
-        if (!name.contains(sub.key(), Qt::CaseInsensitive)) continue;
-        if (best.length() < sub.key().length()) best = sub.key();
-      }
-      if (!best.isEmpty()) {
-        merges.insert(name, subscribed.value(best));
-        continue;
-      }
-
-      const QStringList parts = name.split(split_re, Qt::SkipEmptyParts);
-      for (const QString &part : parts) {
-        const QString candidate = part.trimmed();
-        const auto it = subscribed.constFind(candidate.toLower());
-        if (it == subscribed.cend()) continue;
-        merges.insert(name, it.value());
-        break;
-      }
+      const QString target = YouTubeMusicNames::FoldTarget(name, subscribed);
+      if (!target.isEmpty()) merges.insert(name, target);
     }
   }
 
