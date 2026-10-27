@@ -44,10 +44,6 @@ class LocalRedirectServer : public QTcpServer {
   const QString &error() const { return error_; }
 
   int port() const { return port_; }
-  // Host advertised in the redirect URL. Google rejects "localhost" for loopback redirects and
-  // wants the IP literal, so services that talk to Google set this to "127.0.0.1".
-  void set_host(const QString &host) { host_ = host; }
-  const QString &host() const { return host_; }
   void set_port(const int port) { port_ = port; }
 
   bool Listen();
@@ -74,7 +70,6 @@ class LocalRedirectServer : public QTcpServer {
   QAbstractSocket *socket_;
   QByteArray buffer_;
   bool success_;
-  QString host_ = QStringLiteral("localhost");
   QString error_;
 };
 

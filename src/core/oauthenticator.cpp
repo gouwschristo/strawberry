@@ -45,8 +45,6 @@
 #include "localredirectserver.h"
 #include "oauthenticator.h"
 
-#include "core/logging.h"
-
 using namespace Qt::Literals::StringLiterals;
 using namespace std::chrono_literals;
 
@@ -133,12 +131,6 @@ void OAuthenticator::set_client_secret(const QString &client_secret) {
 void OAuthenticator::set_scope(const QString &scope) {
 
   scope_ = scope;
-
-}
-
-void OAuthenticator::set_local_redirect_host(const QString &host) {
-
-  local_redirect_host_ = host;
 
 }
 
@@ -247,7 +239,6 @@ void OAuthenticator::Authenticate() {
 
   if (use_local_redirect_server_) {
     local_redirect_server_.reset(new LocalRedirectServer(this));
-    if (!local_redirect_host_.isEmpty()) local_redirect_server_->set_host(local_redirect_host_);
     bool success = false;
     if (random_port_) {
       success = local_redirect_server_->Listen();
@@ -301,7 +292,6 @@ void OAuthenticator::Authenticate() {
   QUrl url(authorize_url_);
   url.setQuery(url_query);
 
-  qLog(Info) << "OAuth: opening" << url.toString();
   const bool success = QDesktopServices::openUrl(url);
   if (!success) {
     QMessageBox messagebox(QMessageBox::Information, tr("Authentication"), tr("Please open this URL in your browser") + QStringLiteral(":<br /><a href=\"%1\">%1</a>").arg(url.toString()), QMessageBox::Ok);

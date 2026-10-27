@@ -84,9 +84,6 @@ QNetworkReply *YouTubeMusicBaseRequest::CreateInnerTubeRequest(const QString &en
   QNetworkRequest network_request = YouTubeMusicClient::CreateRequest(endpoint);
   network_request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
-  // Cookie auth only. Measured: with an OAuth Bearer token and no cookie, InnerTube answers
-  // "Request contains an invalid argument." for the library endpoints, so the token cannot
-  // replace the session cookie here (it is for the Data API, not for music.youtube.com).
   const QString cookie = service_->cookie();
   if (!cookie.isEmpty()) {
     network_request.setRawHeader("Cookie", cookie.toUtf8());

@@ -30,7 +30,6 @@
 #include "core/taskmanager.h"
 #include "core/database.h"
 #include "core/networkaccessmanager.h"
-#include "core/oauthenticator.h"
 #include "core/urlhandlers.h"
 #include "covermanager/albumcoverloader.h"
 #include "collection/collectionbackend.h"
@@ -211,9 +210,6 @@ void YouTubeMusicService::ReloadSettings() {
                           QStringLiteral("%1/Music/YouTubeMusic").arg(QDir::homePath())).toString();
   download_format_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadFormat), u"opus"_s).toString();
   download_embed_thumbnail_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadEmbedThumbnail), true).toBool();
-  oauth_client_id_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientId)).toString().trimmed();
-  oauth_client_secret_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientSecret)).toString().trimmed();
-  oauth_enabled_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthEnabled), false).toBool();
   cookies_browser_ = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
   cookies_script_ = s.value(QLatin1String(YouTubeMusicSettings::kCookiesScript),
                             QStringLiteral("%1/Projects/scripts/strawberry-ytm-cookies.py").arg(QDir::homePath())).toString();
@@ -289,85 +285,6 @@ void YouTubeMusicService::SignOut() {
   s.sync();
 
   qLog(Info) << "YouTubeMusic: signed out";
-
-}
-
-
-void YouTubeMusicService::LoginWithBrowser() {
-
-  // Re-read: the settings page writes the fields immediately before calling this.
-  {
-    Settings s;
-    s.beginGroup(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
-    oauth_client_id_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientId)).toString().trimmed();
-    oauth_client_secret_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientSecret)).toString().trimmed();
-    s.endGroup();
-  }
-
-  if (oauth_client_id_.isEmpty()) {
-    qLog(Warning) << "YouTubeMusic: browser sign-in needs a Google OAuth client id";
-    Q_EMIT BrowserLoginFinished(false, tr("Set the Google OAuth client id first (paste it, or use \"Import client JSON\")."));
-    return;
-  }
-
-  if (!oauth_) {
-    oauth_ = new OAuthenticator(network_, this);
-    oauth_->set_settings_group(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
-    oauth_->set_type(OAuthenticator::Type::Authorization_Code);
-    oauth_->set_authorize_url(QUrl(u"https://accounts.google.com/o/oauth2/v2/auth"_s));
-    // OAuthenticator builds redirect_uri from this and adds the local server's port, so only the
-    // scheme/host/path belong here. Leaving it unset produced "redirect_uri=//:35327", which
-    // Google rejects as invalid_request.
-    oauth_->set_redirect_url(QUrl(u"http://127.0.0.1/"_s));
-    oauth_->set_access_token_url(QUrl(u"https://oauth2.googleapis.com/token"_s));
-    // Desktop clients use PKCE, so only the (public) client id is needed.
-    oauth_->set_scope(u"https://www.googleapis.com/auth/youtube"_s);
-    oauth_->set_use_local_redirect_server(true);
-    oauth_->set_random_port(true);
-    // Google rejects "localhost" for loopback redirects and requires the IP literal.
-    oauth_->set_local_redirect_host(u"127.0.0.1"_s);
-    QObject::connect(oauth_, &OAuthenticator::Error, this, [](const QString &error) {
-      qLog(Error) << "YouTubeMusic: OAuth error:" << error;
-    });
-    QObject::connect(oauth_, &OAuthenticator::AuthenticationFinished, this, [this](const bool success, const QString &error) {
-      qLog(Info) << "YouTubeMusic: OAuth finished, success:" << success << error;
-      Q_EMIT SongsUpdateStatus(success ? tr("Signed in with the browser.") : tr("Sign-in failed: %1").arg(error));
-      Q_EMIT BrowserLoginFinished(success, success ? tr("Signed in with the browser.") : error);
-    });
-  }
-
-  oauth_->set_client_id(oauth_client_id_);
-  // Desktop clients do send their (non-confidential) secret; PKCE is the actual protection.
-  oauth_->set_client_secret(oauth_client_secret_);
-  oauth_->LoadSession();
-  oauth_->Authenticate();
-  qLog(Info) << "YouTubeMusic: browser sign-in started for client id" << oauth_client_id_.left(20) + u"..."_s;
-
-}
-
-void YouTubeMusicService::LogoutBrowser() {
-
-  if (!oauth_) return;
-  oauth_->ClearSession();
-  Q_EMIT SongsUpdateStatus(tr("Signed out of the browser session."));
-
-}
-
-QString YouTubeMusicService::oauth_access_token() const {
-
-  if (oauth_ && oauth_->authenticated()) return oauth_->access_token();
-
-  Settings s;
-  s.beginGroup(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
-  const QString stored = s.value(u"access_token"_s).toString();
-  s.endGroup();
-  return stored;
-
-}
-
-bool YouTubeMusicService::oauth_authenticated() const {
-
-  return oauth_ && oauth_->authenticated() && !oauth_->access_token().isEmpty();
 
 }
 
