@@ -1520,6 +1520,7 @@ optional_source(HAVE_TIDAL
 optional_source(HAVE_YOUTUBEMUSIC
   SOURCES
     src/youtubemusic/youtubemusicservice.cpp
+    src/youtubemusic/youtubemusicwalk.cpp
     src/youtubemusic/youtubemusicurlhandler.cpp
     src/youtubemusic/youtubemusicbaserequest.cpp
     src/youtubemusic/youtubemusicrequest.cpp
@@ -1529,7 +1530,8 @@ optional_source(HAVE_YOUTUBEMUSIC
     src/settings/youtubemusicsettingspage.cpp
   HEADERS
     src/youtubemusic/youtubemusicservice.h
-    src/youtubemusic/youtubemusicurlhandler.h
+    src/youtubemusic/youtubemusicwalk.h
+  src/youtubemusic/youtubemusicurlhandler.h
     src/youtubemusic/youtubemusicbaserequest.h
     src/youtubemusic/youtubemusicrequest.h
     src/youtubemusic/youtubemusicstreamurlrequest.h

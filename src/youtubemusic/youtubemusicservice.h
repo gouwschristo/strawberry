@@ -37,6 +37,7 @@ class NetworkAccessManager;
 class AlbumCoverLoader;
 class YouTubeMusicUrlHandler;
 class YouTubeMusicRequest;
+class YouTubeMusicWalk;
 class YouTubeMusicStreamURLRequest;
 class YouTubeMusicDownloadRequest;
 class CollectionBackend;
@@ -209,14 +210,13 @@ class YouTubeMusicService : public StreamingService {
   void StartNextDownloadContainer();
   void StartNextExpansion();
   void ArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error);
-  void StartNextArtistAlbumTracks();
+  void StartArtistTracksWalk();
   void FinishArtistTrackWalk();
 
   // indexer state machine
   void StartNextIndexArtist();
   void IndexArtistAlbumsReceived(const int id, const SongMap &songs, const QString &error);
-  void StartNextIndexAlbum();
-  void IndexAlbumTracksReceived(const int slot, const SongMap &songs, const QString &error);
+  void StartIndexAlbumsWalk();
   void FinishIndexAlbum();
   void FinishIndexLibrary(const QString &error = QString());
   void BeginIndex(const QStringList &artist_ids, const QStringList &artist_names);
@@ -301,23 +301,22 @@ class YouTubeMusicService : public StreamingService {
   YouTubeMusicRequestPtr artist_walk_request_;
   // One album per request; a few run at a time and the results are kept per album so the
   // collected order stays the album order.
-  QHash<int, YouTubeMusicRequest *> artist_walk_requests_;   // parented, deleteLater'd
   // indexer
   QStringList index_artist_ids_;
   QStringList index_artist_names_;
   int index_cursor_ = 0;
   SongList index_albums_;
-  int index_next_album_ = 0;
   int index_albums_total_ = 0;
-  int index_albums_done_ = 0;
+  YouTubeMusicWalk *index_walk_ = nullptr;
+  YouTubeMusicRequestPtr index_artist_request_;   // artist -> album list, one per artist
   int index_task_id_ = -1;
   bool index_cancelled_ = false;
   bool index_artist_had_errors_ = false;
   bool prefetch_ = true;
   QTimer *prefetch_timer_ = nullptr;
-  QHash<int, YouTubeMusicRequest *> index_requests_;   // parented, deleteLater'd
+
   QVector<SongList> artist_walk_results_;
-  int artist_walk_next_ = 0;
+  YouTubeMusicWalk *artist_walk_ = nullptr;
   YouTubeMusicDownloadRequest *download_request_;
   int download_task_id_;
 };

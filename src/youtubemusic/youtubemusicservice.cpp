@@ -37,6 +37,7 @@
 #include "streaming/streamingservice.h"
 #include "constants/youtubemusicsettings.h"
 #include "youtubemusic/youtubemusicrequest.h"
+#include "youtubemusic/youtubemusicwalk.h"
 #include "youtubemusic/youtubemusicstreamurlrequest.h"
 #include "youtubemusic/youtubemusicdownloadrequest.h"
 #include "youtubemusic/youtubemusicurlhandler.h"
@@ -784,12 +785,8 @@ void YouTubeMusicService::CancelIndexLibrary() {
 
 void YouTubeMusicService::StartNextIndexArtist() {
 
-  for (YouTubeMusicRequest *request : std::as_const(index_requests_)) {
-    if (request) request->deleteLater();
-  }
-  index_requests_.clear();
+  if (index_walk_) index_walk_->Cancel();
   index_albums_.clear();
-  index_next_album_ = 0;
 
   if (index_cancelled_ || index_cursor_ >= index_artist_ids_.count()) {
     FinishIndexLibrary();
@@ -804,10 +801,9 @@ void YouTubeMusicService::StartNextIndexArtist() {
   Q_EMIT SongsUpdateStatus(tr("Indexing %1 (%2/%3)...").arg(artist_name).arg(index_cursor_ + 1).arg(index_artist_ids_.count()));
 
   const Song artist = ContainerSong(artist_id, artist_name, QString(), true);
-  auto *request = new YouTubeMusicRequest(this, network_, this);
-  index_requests_.insert(0, request);
-  QObject::connect(request, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::IndexArtistAlbumsReceived);
-  request->ProcessArtistAlbums(artist);
+  index_artist_request_.reset(new YouTubeMusicRequest(this, network_, this));
+  QObject::connect(&*index_artist_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::IndexArtistAlbumsReceived);
+  index_artist_request_->ProcessArtistAlbums(artist);
 
 }
 
@@ -815,7 +811,7 @@ void YouTubeMusicService::IndexArtistAlbumsReceived(const int id, const SongMap 
 
   Q_UNUSED(id);
 
-  if (YouTubeMusicRequest *request = index_requests_.take(0)) request->deleteLater();
+  index_artist_request_.reset();
 
   if (!error.isEmpty()) {
     index_artist_had_errors_ = true;
@@ -827,78 +823,47 @@ void YouTubeMusicService::IndexArtistAlbumsReceived(const int id, const SongMap 
   }
 
   index_albums_total_ = index_albums_.count();
-  index_albums_done_ = 0;
-  StartNextIndexAlbum();
+  StartIndexAlbumsWalk();
 
 }
 
-void YouTubeMusicService::StartNextIndexAlbum() {
+void YouTubeMusicService::StartIndexAlbumsWalk() {
 
-  if (index_cancelled_) {
-    FinishIndexLibrary();
-    return;
-  }
+  if (!index_walk_) index_walk_ = new YouTubeMusicWalk(this, this);
 
-  // Three albums in flight, like the artist walk.
-  constexpr int kMaxConcurrentAlbums = 3;
-  while (index_requests_.size() < kMaxConcurrentAlbums && index_next_album_ < index_albums_.count()) {
-    const int slot = index_next_album_++;
-    const Song album = index_albums_.at(slot);
-    auto *request = new YouTubeMusicRequest(this, network_, this);
-    index_requests_.insert(slot, request);
-    // Capture the slot: the reply has to retire *its own* request, not the lowest key.
-    QObject::connect(request, &YouTubeMusicRequest::Results, this,
-                     [this, slot](const int, const SongMap &songs, const QString &error) {
-                       IndexAlbumTracksReceived(slot, songs, error);
-                     });
-    request->ProcessAlbum(album);
-  }
+  index_walk_->Run(index_albums_, 3,
+                   [this](const int index, const Song &album) -> YouTubeMusicRequest * {
+                     Q_UNUSED(index);
+                     auto *request = new YouTubeMusicRequest(this, network_, this);
+                     request->ProcessAlbum(album);
+                     return request;
+                   },
+                   [this](const int index, const SongMap &songs, const QString &error) {
+                     if (!error.isEmpty()) {
+                       index_artist_had_errors_ = true;
+                       qLog(Warning) << "YouTubeMusic: index could not read an album of"
+                                     << index_artist_names_.value(index_cursor_) << ":" << error;
+                     }
 
-  if (index_requests_.isEmpty()) {
-    FinishIndexAlbum();
-  }
-
-}
-
-void YouTubeMusicService::IndexAlbumTracksReceived(const int slot, const SongMap &songs, const QString &error) {
-
-  if (!error.isEmpty()) {
-    index_artist_had_errors_ = true;
-    qLog(Warning) << "YouTubeMusic: index could not read an album of"
-                  << index_artist_names_.value(index_cursor_) << ":" << error;
-  }
-
-  if (YouTubeMusicRequest *request = index_requests_.take(slot)) request->deleteLater();
-
-  if (!songs.isEmpty()) {
-    SongList tracks = songs.values();
-    // An album page lists its tracks with title + duration only: the album context has to come
-    // from the album row this walk used, exactly like the expansion path does. Without it the
-    // tracks landed with no album and the album row stayed empty.
-    const Song album = index_albums_.value(slot);
-    // The artist is the one whose walk produced this album, not the album's credit line:
-    // "Rezz & PVRIS" is an album credit, and using it split the tree into 1264 artists
-    // (769 of them collaboration strings) instead of the 145 in the library.
-    const QString walked_artist = index_artist_names_.value(index_cursor_);
-    for (Song &track : tracks) {
-      if (track.album().isEmpty() && !album.album().isEmpty()) track.set_album(album.album());
-      if (track.album_id().isEmpty() && !album.album_id().isEmpty()) track.set_album_id(album.album_id());
-      const QString artist = walked_artist.isEmpty() ? album.artist() : walked_artist;
-      if (!artist.isEmpty()) {
-        track.set_artist(artist);
-        track.set_albumsort(track.album());
-        track.set_albumartist(artist);
-      }
-    }
-    // Only the artists tree stores artist -> album -> track; the albums list holds album rows.
-    artists_collection_backend_->AddOrUpdateSongsAsync(tracks);
-  }
-
-  ++index_albums_done_;
-  if (index_albums_total_ > 0) {
-    task_manager_->SetTaskProgress(index_task_id_, index_cursor_, index_artist_ids_.count());
-  }
-  StartNextIndexAlbum();
+                     if (!songs.isEmpty()) {
+                       SongList tracks = songs.values();
+                       // The album page lists tracks with title + duration only, so the album
+                       // context comes from the album row this walk used.
+                       const Song album = index_albums_.value(index);
+                       const QString walked_artist = index_artist_names_.value(index_cursor_);
+                       for (Song &track : tracks) {
+                         if (track.album().isEmpty() && !album.album().isEmpty()) track.set_album(album.album());
+                         if (track.album_id().isEmpty() && !album.album_id().isEmpty()) track.set_album_id(album.album_id());
+                         const QString artist = walked_artist.isEmpty() ? album.artist() : walked_artist;
+                         if (!artist.isEmpty()) {
+                           track.set_artist(artist);
+                           track.set_albumartist(artist);
+                         }
+                       }
+                       artists_collection_backend_->AddOrUpdateSongsAsync(tracks);
+                     }
+                   },
+                   [this]() { FinishIndexAlbum(); });
 
 }
 
@@ -932,10 +897,7 @@ void YouTubeMusicService::FinishIndexAlbum() {
 
 void YouTubeMusicService::FinishIndexLibrary(const QString &error) {
 
-  for (YouTubeMusicRequest *request : std::as_const(index_requests_)) {
-    if (request) request->deleteLater();
-  }
-  index_requests_.clear();
+  if (index_walk_) index_walk_->Cancel();
 
   if (index_task_id_ >= 0) {
     task_manager_->SetTaskFinished(index_task_id_);
@@ -945,7 +907,6 @@ void YouTubeMusicService::FinishIndexLibrary(const QString &error) {
   index_artist_ids_.clear();
   index_artist_names_.clear();
   index_albums_.clear();
-  index_next_album_ = 0;
 
   Q_EMIT SongsUpdateStatus(error.isEmpty() ? QString() : error);
   qLog(Info) << "YouTubeMusic: library index finished";
@@ -1516,9 +1477,8 @@ void YouTubeMusicService::GetAllArtistTracks(const Song &artist) {
 
   artist_tracks_albums_.clear();
   artist_tracks_collected_.clear();
-  artist_walk_requests_.clear();
+  if (artist_walk_) artist_walk_->Cancel();
   artist_walk_results_.clear();
-  artist_walk_next_ = 0;
 
   artist_walk_request_.reset(new YouTubeMusicRequest(this, network_, this));
   QObject::connect(&*artist_walk_request_, &YouTubeMusicRequest::Results, this, &YouTubeMusicService::ArtistAlbumsReceived);
@@ -1543,55 +1503,41 @@ void YouTubeMusicService::ArtistAlbumsReceived(const int id, const SongMap &song
     if (!album.album_id().isEmpty()) artist_tracks_albums_ << album;
   }
 
-  artist_walk_results_.resize(artist_tracks_albums_.count());
   qLog(Info) << "YouTubeMusic: collecting tracks from" << artist_tracks_albums_.count() << "album(s)";
-  StartNextArtistAlbumTracks();
+  StartArtistTracksWalk();
 
 }
 
-void YouTubeMusicService::StartNextArtistAlbumTracks() {
+void YouTubeMusicService::StartArtistTracksWalk() {
 
-  // Three albums in flight at a time: fast enough for a 25 album artist to feel instant,
-  // and still polite to the API. Results are stored per album so the order is preserved.
-  constexpr int kMaxConcurrentAlbums = 3;
+  if (!artist_walk_) artist_walk_ = new YouTubeMusicWalk(this, this);
 
-  while (artist_walk_requests_.size() < kMaxConcurrentAlbums && artist_walk_next_ < artist_tracks_albums_.count()) {
-    const int index = artist_walk_next_++;
-    const Song album = artist_tracks_albums_.at(index);
+  artist_walk_results_.resize(artist_tracks_albums_.count());
 
-    auto *request = new YouTubeMusicRequest(this, network_, this);
-    artist_walk_requests_.insert(index, request);
-    QObject::connect(request, &YouTubeMusicRequest::Results, this,
-                     [this, index](const int id, const SongMap &songs, const QString &error) {
-                       Q_UNUSED(id);
-                       if (YouTubeMusicRequest *finished = artist_walk_requests_.take(index)) finished->deleteLater();
-                       if (error.isEmpty()) {
-                         SongList collected;
-                         for (const Song &song : songs) {
-                           if (!song.song_id().isEmpty()) collected << song;
-                         }
-                         artist_walk_results_[index] = collected;
-                       }
-                       StartNextArtistAlbumTracks();
-                     });
-    request->ProcessAlbum(album);
-  }
-
-  const int remaining = artist_tracks_albums_.count() - artist_walk_next_ + artist_walk_requests_.size();
-  Q_EMIT SongsUpdateStatus(tr("Collecting tracks: %1 album(s) left").arg(std::max(0, remaining)));
-
-  if (artist_walk_requests_.isEmpty() && artist_walk_next_ >= artist_tracks_albums_.count()) {
-    FinishArtistTrackWalk();
-  }
+  artist_walk_->Run(artist_tracks_albums_, 3,
+                    [this](const int index, const Song &album) -> YouTubeMusicRequest * {
+                      Q_UNUSED(index);
+                      auto *request = new YouTubeMusicRequest(this, network_, this);
+                      request->ProcessAlbum(album);
+                      return request;
+                    },
+                    [this](const int index, const SongMap &songs, const QString &error) {
+                      SongList collected;
+                      if (error.isEmpty()) {
+                        for (const Song &song : songs) {
+                          if (!song.song_id().isEmpty()) collected << song;
+                        }
+                      }
+                      artist_walk_results_[index] = collected;
+                      const int remaining = artist_tracks_albums_.count() - artist_walk_->finished_count();
+                      Q_EMIT SongsUpdateStatus(tr("Collecting tracks: %1 album(s) left").arg(std::max(0, remaining)));
+                    },
+                    [this]() { FinishArtistTrackWalk(); });
 
 }
 
 void YouTubeMusicService::FinishArtistTrackWalk() {
 
-  for (YouTubeMusicRequest *request : std::as_const(artist_walk_requests_)) {
-    if (request) request->deleteLater();
-  }
-  artist_walk_requests_.clear();
 
   artist_tracks_collected_.clear();
   for (const SongList &album_tracks : artist_walk_results_) {
@@ -1602,7 +1548,6 @@ void YouTubeMusicService::FinishArtistTrackWalk() {
     }
   }
   artist_walk_results_.clear();
-  artist_walk_next_ = 0;
 
   qLog(Info) << "YouTubeMusic: collected" << artist_tracks_collected_.count() << "track(s) for the artist";
 
