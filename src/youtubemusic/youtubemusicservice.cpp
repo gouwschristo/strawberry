@@ -154,6 +154,7 @@ YouTubeMusicService::YouTubeMusicService(const SharedPtr<TaskManager> task_manag
 
   // Self-healing: collapse artist names that only differ by capitalisation.
   NormalizeArtistNames();
+  MigrateIndexStamps();
   MergeCollaborationArtists();
 
   // YouTube rotates the session cookies hourly, and importing them takes a few seconds
@@ -644,20 +645,30 @@ void YouTubeMusicService::IndexLibrary(const int max_artists) {
     while (q.next()) candidates << Candidate{q.value(0).toString(), q.value(1).toString(), QString()};
   }
 
-  Settings s;
-  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
-  const QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
-  s.endGroup();
+  // Staleness comes from the index table; missing rows sort first so a fresh install indexes.
+  QHash<QString, qint64> stamps;
+  {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT artist_id, indexed_at FROM youtubemusic_index"));
+    if (!q.Exec()) {
+      database_->ReportErrors(q);
+      return;
+    }
+    while (q.next()) stamps.insert(q.value(0).toString(), q.value(1).toLongLong());
+  }
 
-  const QDateTime now = QDateTime::currentDateTime();
+  const qint64 now = QDateTime::currentSecsSinceEpoch();
+  const qint64 ttl = static_cast<qint64>(YouTubeMusicSettings::kIndexTtlDays) * 24 * 60 * 60;
   QList<Candidate> stale;
   for (const Candidate &candidate : std::as_const(candidates)) {
-    const QDateTime stamp = QDateTime::fromString(indexed.value(candidate.id).toString(), Qt::ISODate);
-    if (stamp.isValid() && stamp.secsTo(now) < YouTubeMusicSettings::kIndexTtlDays * 24 * 60 * 60) continue;
+    const auto stamp = stamps.constFind(candidate.id);
+    if (stamp != stamps.cend() && now - stamp.value() < ttl) continue;
     stale << candidate;
   }
-  std::sort(stale.begin(), stale.end(), [&indexed](const Candidate &a, const Candidate &b) {
-    return indexed.value(a.id).toString() < indexed.value(b.id).toString();
+  std::sort(stale.begin(), stale.end(), [&stamps](const Candidate &a, const Candidate &b) {
+    return stamps.value(a.id) < stamps.value(b.id);
   });
 
   if (max_artists > 0 && stale.count() > max_artists) stale = stale.mid(0, max_artists);
@@ -717,14 +728,24 @@ void YouTubeMusicService::PrefetchNextArtist() {
 
   Settings s;
   s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
-  const QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
   const QStringList recent = s.value(YouTubeMusicSettings::kRecentArtists).toStringList();
   s.endGroup();
 
-  const QDateTime now = QDateTime::currentDateTime();
-  auto is_stale = [&indexed, &now](const QString &id) {
-    const QDateTime stamp = QDateTime::fromString(indexed.value(id).toString(), Qt::ISODate);
-    return !stamp.isValid() || stamp.secsTo(now) >= YouTubeMusicSettings::kIndexTtlDays * 24 * 60 * 60;
+  QHash<QString, qint64> stamps;
+  {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT artist_id, indexed_at FROM youtubemusic_index"));
+    if (!q.Exec()) return;
+    while (q.next()) stamps.insert(q.value(0).toString(), q.value(1).toLongLong());
+  }
+
+  const qint64 now = QDateTime::currentSecsSinceEpoch();
+  const qint64 ttl = static_cast<qint64>(YouTubeMusicSettings::kIndexTtlDays) * 24 * 60 * 60;
+  auto is_stale = [&stamps, now, ttl](const QString &id) {
+    const auto stamp = stamps.constFind(id);
+    return stamp == stamps.cend() || now - stamp.value() >= ttl;
   };
 
   // Preferred: what the user just looked at.
@@ -737,7 +758,7 @@ void YouTubeMusicService::PrefetchNextArtist() {
 
   // Otherwise the oldest entry, so a background run eventually covers the library.
   QString oldest_id;
-  QString oldest_stamp;
+  qint64 oldest_stamp = 0;
   QMutexLocker locker(database_->Mutex());
   QSqlDatabase db = database_->Connect();
   SqlQuery q(db);
@@ -746,7 +767,7 @@ void YouTubeMusicService::PrefetchNextArtist() {
   while (q.next()) {
     const QString id = q.value(0).toString();
     if (!is_stale(id)) continue;
-    const QString stamp = indexed.value(id).toString();
+    const qint64 stamp = stamps.value(id);
     if (oldest_id.isEmpty() || stamp < oldest_stamp) {
       oldest_id = id;
       oldest_stamp = stamp;
@@ -880,13 +901,15 @@ void YouTubeMusicService::FinishIndexAlbum() {
     return;
   }
 
-  Settings s;
-  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
-  QVariantMap indexed = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
-  indexed.insert(index_artist_ids_.value(index_cursor_), QDateTime::currentDateTime().toString(Qt::ISODate));
-  s.setValue(YouTubeMusicSettings::kIndexedArtists, indexed);
-  s.endGroup();
-  s.sync();
+  {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO youtubemusic_index (artist_id, indexed_at) VALUES (?, ?)"));
+    q.addBindValue(index_artist_ids_.value(index_cursor_));
+    q.addBindValue(QDateTime::currentSecsSinceEpoch());
+    if (!q.Exec()) database_->ReportErrors(q);
+  }
 
   qLog(Info) << "YouTubeMusic: indexed" << index_artist_names_.value(index_cursor_)
              << "(" << index_albums_total_ << "albums )";
@@ -1027,6 +1050,39 @@ QString YouTubeMusicService::WriteCookieFile(QTemporaryFile *file) const {
 
 }
 
+
+
+void YouTubeMusicService::MigrateIndexStamps() {
+
+  Settings s;
+  s.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  if (!s.contains(YouTubeMusicSettings::kIndexedArtists)) return;
+  const QVariantMap legacy = s.value(YouTubeMusicSettings::kIndexedArtists).toMap();
+  s.endGroup();
+
+  if (!legacy.isEmpty()) {
+    QMutexLocker locker(database_->Mutex());
+    QSqlDatabase db = database_->Connect();
+    for (auto it = legacy.cbegin(); it != legacy.cend(); ++it) {
+      const QDateTime stamp = QDateTime::fromString(it.value().toString(), Qt::ISODate);
+      if (!stamp.isValid()) continue;
+      SqlQuery q(db);
+      q.prepare(QStringLiteral("INSERT OR REPLACE INTO youtubemusic_index (artist_id, indexed_at) VALUES (?, ?)"));
+      q.addBindValue(it.key());
+      q.addBindValue(stamp.toSecsSinceEpoch());
+      if (!q.Exec()) database_->ReportErrors(q);
+    }
+    locker.unlock();
+    qLog(Info) << "YouTubeMusic: migrated" << legacy.count() << "index stamp(s) into the database";
+  }
+
+  Settings cleanup;
+  cleanup.beginGroup(YouTubeMusicSettings::kSettingsGroup);
+  cleanup.remove(YouTubeMusicSettings::kIndexedArtists);
+  cleanup.endGroup();
+  cleanup.sync();
+
+}
 
 void YouTubeMusicService::MergeCollaborationArtists() {
 
