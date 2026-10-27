@@ -34,6 +34,10 @@ constexpr int kIndexTtlDays = 7;
 constexpr char kRecentArtists[] = "recent_artists";
 // index artists in the background while the app is idle
 constexpr char kPrefetchIndex[] = "prefetch_index";
+// tidy the artist tree at startup (fold collaborations, drop unsubscribed artists and empty
+// albums). Set kStartupCleanupDryRun to see what would be removed without removing it.
+constexpr char kStartupCleanup[] = "startup_cleanup";
+constexpr char kStartupCleanupDryRun[] = "startup_cleanup_dry_run";
 constexpr char kDownloadDir[] = "download_dir";
 constexpr char kDownloadFormat[] = "download_format";
 constexpr char kDownloadEmbedThumbnail[] = "download_embed_thumbnail";

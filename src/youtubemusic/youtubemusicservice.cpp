@@ -153,9 +153,14 @@ YouTubeMusicService::YouTubeMusicService(const SharedPtr<TaskManager> task_manag
   YouTubeMusicService::ReloadSettings();
 
   // Self-healing: collapse artist names that only differ by capitalisation.
-  NormalizeArtistNames();
   MigrateIndexStamps();
-  MergeCollaborationArtists();
+  if (startup_cleanup_) {
+    NormalizeArtistNames();
+    MergeCollaborationArtists();
+  }
+  else {
+    qLog(Info) << "YouTubeMusic: startup cleanup disabled in the settings";
+  }
 
   // YouTube rotates the session cookies hourly, and importing them takes a few seconds
   // (yt-dlp reads the browser store). Do that in the background shortly after start instead
@@ -191,6 +196,8 @@ void YouTubeMusicService::ReloadSettings() {
   search_limit_ = s.value(QLatin1String(YouTubeMusicSettings::kSearchLimit), 50).toInt();
   remove_remastered_ = s.value(QLatin1String(YouTubeMusicSettings::kRemoveRemastered), true).toBool();
   prefetch_ = s.value(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), true).toBool();
+  startup_cleanup_ = s.value(QLatin1String(YouTubeMusicSettings::kStartupCleanup), true).toBool();
+  startup_cleanup_dry_run_ = s.value(QLatin1String(YouTubeMusicSettings::kStartupCleanupDryRun), false).toBool();
   if (!prefetch_timer_) {
     prefetch_timer_ = new QTimer(this);
     prefetch_timer_->setInterval(YouTubeMusicConstants::kPrefetchIntervalSeconds * 1000);
@@ -1213,6 +1220,11 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     return;
   }
 
+  if (startup_cleanup_dry_run_) {
+    qLog(Info) << "YouTubeMusic: dry run - would remove" << strays.count() << "artist(s):" << strays.join(u", "_s);
+    return;
+  }
+
   for (const QString &artist : std::as_const(strays)) {
     SqlQuery q(db);
     q.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE artist = ?"));
@@ -1229,6 +1241,17 @@ void YouTubeMusicService::MergeCollaborationArtists() {
 
   // An album row whose pages never yielded a track opens to nothing: drop it from the tree.
   // If a later walk finds tracks for it, the row comes back with them.
+  if (startup_cleanup_dry_run_) {
+    SqlQuery would(db);
+    would.prepare(QStringLiteral("SELECT count(*) FROM youtubemusic_artists_songs WHERE album_id <> '' AND album_id IN ("
+                                 "SELECT album_id FROM youtubemusic_artists_songs WHERE album_id <> '' "
+                                 "GROUP BY album_id HAVING sum(CASE WHEN coalesce(song_id, '') <> '' THEN 1 ELSE 0 END) = 0)"));
+    if (would.Exec() && would.next()) {
+      qLog(Info) << "YouTubeMusic: dry run - would remove" << would.value(0).toInt() << "album row(s) without tracks";
+    }
+    return;
+  }
+
   SqlQuery empty(db);
   empty.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE album_id <> '' AND album_id IN ("
                                "SELECT album_id FROM youtubemusic_artists_songs WHERE album_id <> '' "

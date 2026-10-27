@@ -315,6 +315,8 @@ class YouTubeMusicService : public StreamingService {
   bool index_cancelled_ = false;
   bool index_artist_had_errors_ = false;
   bool prefetch_ = true;
+  bool startup_cleanup_ = true;
+  bool startup_cleanup_dry_run_ = false;
   QTimer *prefetch_timer_ = nullptr;
 
   QVector<SongList> artist_walk_results_;
