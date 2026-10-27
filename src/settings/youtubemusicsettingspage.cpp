@@ -44,6 +44,8 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
       label_account_detail_(new QLabel(this)),
       button_sign_out_(new QPushButton(tr("Sign out"), this)),
       button_index_library_(new QPushButton(tr("Index library"), this)),
+      lineedit_oauth_client_id_(new QLineEdit(this)),
+      button_login_browser_(new QPushButton(tr("Sign in with the browser (OAuth)"), this)),
       checkbox_prefetch_index_(new QCheckBox(tr("Keep indexing in the background (one artist at a time, most recently browsed first)"), this)),
       checkbox_startup_cleanup_(new QCheckBox(tr("Tidy the artist list at startup (fold collaborations, hide artists you do not follow)"), this)),
       combobox_cookies_browser_(new QComboBox(this)),
@@ -95,11 +97,20 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   layout_browser->addRow(tr("Read cookies from:"), combobox_cookies_browser_);
   layout_login->addLayout(layout_browser);
 
+  lineedit_oauth_client_id_->setPlaceholderText(u"1234-abcd.apps.googleusercontent.com"_s);
+  lineedit_oauth_client_id_->setToolTip(tr("Client id of a \"Desktop app\" OAuth client from your own Google Cloud project. "
+                                           "No secret is needed: desktop clients use PKCE. This gives a refresh token, so the "
+                                           "session does not expire with the browser cookies."));
+  QFormLayout *layout_oauth = new QFormLayout();
+  layout_oauth->addRow(tr("OAuth client id:"), lineedit_oauth_client_id_);
+  layout_login->addLayout(layout_oauth);
+
   QHBoxLayout *layout_buttons = new QHBoxLayout();
   layout_buttons->addWidget(button_sign_in_);
   layout_buttons->addWidget(button_import_cookies_);
   layout_buttons->addWidget(button_sign_out_);
   layout_buttons->addWidget(button_index_library_);
+  layout_buttons->addWidget(button_login_browser_);
   layout_buttons->addStretch();
   layout_login->addLayout(layout_buttons);
 
@@ -166,6 +177,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   QObject::connect(button_import_cookies_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::ImportCookies);
   QObject::connect(button_sign_out_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignOut);
   QObject::connect(button_index_library_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::IndexLibrary);
+  QObject::connect(button_login_browser_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::LoginWithBrowser);
 
   Load();
 
@@ -184,6 +196,7 @@ void YouTubeMusicSettingsPage::Load() {
   checkbox_auto_refresh_cookies_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), true).toBool());
   checkbox_prefetch_index_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), true).toBool());
   checkbox_startup_cleanup_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kStartupCleanup), true).toBool());
+  lineedit_oauth_client_id_->setText(s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientId)).toString());
   const QString browser = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
   const int browser_index = combobox_cookies_browser_->findData(browser);
   if (browser_index >= 0) combobox_cookies_browser_->setCurrentIndex(browser_index);
@@ -213,6 +226,7 @@ void YouTubeMusicSettingsPage::Save() {
   s.setValue(QLatin1String(YouTubeMusicSettings::kAutoRefreshCookies), checkbox_auto_refresh_cookies_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), checkbox_prefetch_index_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kStartupCleanup), checkbox_startup_cleanup_->isChecked());
+  s.setValue(QLatin1String(YouTubeMusicSettings::kOAuthClientId), lineedit_oauth_client_id_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), combobox_cookies_browser_->currentData().toString());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadDir), lineedit_download_dir_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadFormat), combobox_download_format_->currentData().toString());
@@ -307,5 +321,16 @@ void YouTubeMusicSettingsPage::IndexLibrary() {
   service_->IndexLibrary();
   label_login_state_->setText(tr("Indexing the library in the background - artists already indexed "
                                  "are skipped."));
+
+}
+
+void YouTubeMusicSettingsPage::LoginWithBrowser() {
+
+  if (!service_) return;
+
+  // The client id is saved with the settings; write it before starting the flow.
+  Save();
+  service_->LoginWithBrowser();
+  label_login_state_->setText(tr("A browser window will open - sign in there, the loopback redirect completes it."));
 
 }

@@ -29,6 +29,7 @@
 #include "collection/collectionmodel.h"
 
 class QTimer;
+class OAuthenticator;
 
 class TaskManager;
 class Database;
@@ -129,6 +130,12 @@ class YouTubeMusicService : public StreamingService {
   bool ImportCookiesFromBrowser(const QString &browser, QString *error = nullptr);
   // Forgets the stored session.
   void SignOut();
+  // Browser + loopback redirect (OAuthenticator): signs in with the real browser and stores a
+  // refresh token, so the session no longer depends on browser cookies.
+  void LoginWithBrowser();
+  void LogoutBrowser();
+  bool oauth_authenticated() const;
+  QString oauth_client_id() const { return oauth_client_id_; }
   // Re-imports the browser cookies shortly after start so the first request does not stall.
   void RefreshCookiesInBackground();
 
@@ -317,6 +324,9 @@ class YouTubeMusicService : public StreamingService {
   bool prefetch_ = true;
   bool startup_cleanup_ = true;
   bool startup_cleanup_dry_run_ = false;
+  OAuthenticator *oauth_ = nullptr;
+  QString oauth_client_id_;
+  bool oauth_enabled_ = false;
   QTimer *prefetch_timer_ = nullptr;
 
   QVector<SongList> artist_walk_results_;
