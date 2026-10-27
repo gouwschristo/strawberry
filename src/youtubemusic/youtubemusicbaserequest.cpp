@@ -23,22 +23,11 @@
 #include "core/networkaccessmanager.h"
 #include "youtubemusic/youtubemusicservice.h"
 #include "youtubemusicbaserequest.h"
+#include "youtubemusicclient.h"
 
 using namespace Qt::Literals::StringLiterals;
 
-namespace {
-// The InnerTube "web" API key. This is the public key that music.youtube.com ships in its
-// own client bundle - it is not an account credential, grants nothing on its own (requests
-// are authorised by the cookie) and is identical in every browser session. It is kept
-// base64-encoded only so secret scanners stop flagging a public constant in every clone.
-const char *ApiKey() {
-  static const QByteArray decoded = QByteArray::fromBase64(QByteArrayLiteral("QUl6YVN5QzlYTDNaaldkZFh5YTZYNzRkSm9DVEwtV0VZRkROWDMw"));
-  return decoded.constData();
-}
-constexpr char kClientVersion[] = "1.20240101.01.00";
-constexpr char kUserAgent[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-constexpr char kOrigin[] = "https://music.youtube.com";
-}  // namespace
+
 
 YouTubeMusicBaseRequest::YouTubeMusicBaseRequest(YouTubeMusicService *service, const SharedPtr<NetworkAccessManager> network, QObject *parent)
     : JsonBaseRequest(network, parent),
@@ -48,13 +37,10 @@ YouTubeMusicBaseRequest::YouTubeMusicBaseRequest(YouTubeMusicService *service, c
 
 QJsonObject YouTubeMusicBaseRequest::CreateContext() {
 
-  QJsonObject client;
-  client["clientName"_L1] = u"WEB_REMIX"_s;
-  client["clientVersion"_L1] = QLatin1String(kClientVersion);
-  client["hl"_L1] = u"en"_s;
+  // The client the service uses also wants a geo, which the shared context leaves out.
+  QJsonObject context = YouTubeMusicClient::Context();
+  QJsonObject client = context["client"_L1].toObject();
   client["gl"_L1] = u"US"_s;
-
-  QJsonObject context;
   context["client"_L1] = client;
 
   return context;
@@ -95,12 +81,7 @@ QByteArray YouTubeMusicBaseRequest::authorization_header() const {
 
 QNetworkReply *YouTubeMusicBaseRequest::CreateInnerTubeRequest(const QString &endpoint, const QJsonObject &json_body) {
 
-  QNetworkRequest network_request(QUrl(QLatin1String(kOrigin) + endpoint));
-  network_request.setHeader(QNetworkRequest::ContentTypeHeader, u"application/json"_s);
-  network_request.setHeader(QNetworkRequest::UserAgentHeader, QLatin1String(kUserAgent));
-  network_request.setRawHeader("X-Goog-Api-Key", ApiKey());
-  network_request.setRawHeader("Origin", kOrigin);
-  network_request.setRawHeader("Referer", "https://music.youtube.com/");
+  QNetworkRequest network_request = YouTubeMusicClient::CreateRequest(endpoint);
   network_request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
   const QString cookie = service_->cookie();

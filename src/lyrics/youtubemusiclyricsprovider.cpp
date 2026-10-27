@@ -30,39 +30,17 @@
 #include "core/logging.h"
 #include "core/networkaccessmanager.h"
 #include "lyrics/lyricssearchresult.h"
+#include "youtubemusic/youtubemusicclient.h"
 
 using namespace Qt::Literals::StringLiterals;
 
-namespace {
-// Same public InnerTube web key the streaming service uses (see youtubemusicbaserequest.cpp):
-// base64 so repository secret scanners do not flag a public constant in every clone.
-const char *ApiKey() {
-  static const QByteArray decoded = QByteArray::fromBase64(QByteArrayLiteral("QUl6YVN5QzlYTDNaaldkZFh5YTZYNzRkSm9DVEwtV0VZRkROWDMw"));
-  return decoded.constData();
-}
-constexpr char kOrigin[] = "https://music.youtube.com";
-constexpr char kClientVersion[] = "1.20240101.01.00";
-constexpr char kUserAgent[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-QJsonObject ClientContext() {
-  return QJsonObject{{u"client"_s, QJsonObject{{u"clientName"_s, u"WEB_REMIX"_s},
-                                              {u"clientVersion"_s, QLatin1String(kClientVersion)},
-                                              {u"hl"_s, u"en"_s}}}};
-}
-}  // namespace
 
 YouTubeMusicLyricsProvider::YouTubeMusicLyricsProvider(const SharedPtr<NetworkAccessManager> network, QObject *parent)
     : LyricsProvider(u"YouTube Music"_s, true, false, network, parent), network_(network) {}
 
 QNetworkReply *YouTubeMusicLyricsProvider::PostInnerTube(const QString &endpoint, const QJsonObject &body) {
 
-  QNetworkRequest request(QUrl(QLatin1String(kOrigin) + u"/youtubei/v1/"_s + endpoint + u"?prettyPrint=false"_s));
-  request.setHeader(QNetworkRequest::ContentTypeHeader, u"application/json"_s);
-  request.setHeader(QNetworkRequest::UserAgentHeader, QLatin1String(kUserAgent));
-  request.setRawHeader("X-Goog-Api-Key", ApiKey());
-  request.setRawHeader("Origin", kOrigin);
-  request.setRawHeader("Referer", kOrigin);
-
+  const QNetworkRequest request = YouTubeMusicClient::CreateRequest(u"/youtubei/v1/"_s + endpoint + u"?prettyPrint=false"_s);
   return network_->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
 }
@@ -75,7 +53,7 @@ void YouTubeMusicLyricsProvider::StartSearch(const int id, const LyricsSearchReq
     return;
   }
 
-  const QJsonObject body{{u"context"_s, ClientContext()}, {u"query"_s, query}};
+  const QJsonObject body{{u"context"_s, YouTubeMusicClient::Context()}, {u"query"_s, query}};
   QNetworkReply *reply = PostInnerTube(u"search"_s, body);
   QObject::connect(reply, &QNetworkReply::finished, this, [this, id, request, reply]() {
     SearchReplyFinished(id, request, reply);
@@ -102,7 +80,7 @@ void YouTubeMusicLyricsProvider::SearchReplyFinished(const int id, const LyricsS
   }
 
   const QString video_id = match.captured(1);
-  const QJsonObject body{{u"context"_s, ClientContext()}, {u"videoId"_s, video_id}};
+  const QJsonObject body{{u"context"_s, YouTubeMusicClient::Context()}, {u"videoId"_s, video_id}};
   QNetworkReply *next_reply = PostInnerTube(u"next"_s, body);
   QObject::connect(next_reply, &QNetworkReply::finished, this, [this, id, request, video_id, next_reply]() {
     LyricsIdReplyFinished(id, request, video_id, next_reply);
@@ -129,7 +107,7 @@ void YouTubeMusicLyricsProvider::LyricsIdReplyFinished(const int id, const Lyric
     return;
   }
 
-  const QJsonObject body{{u"context"_s, ClientContext()}, {u"browseId"_s, match.captured(1)}};
+  const QJsonObject body{{u"context"_s, YouTubeMusicClient::Context()}, {u"browseId"_s, match.captured(1)}};
   QNetworkReply *lyrics_reply = PostInnerTube(u"browse"_s, body);
   QObject::connect(lyrics_reply, &QNetworkReply::finished, this, [this, id, request, lyrics_reply]() {
     LyricsReplyFinished(id, request, lyrics_reply);
