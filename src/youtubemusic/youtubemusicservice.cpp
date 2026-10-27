@@ -38,6 +38,7 @@
 #include "constants/youtubemusicconstants.h"
 #include "constants/youtubemusicsettings.h"
 #include "youtubemusic/youtubemusicindexlogic.h"
+#include "youtubemusic/youtubemusicindexstore.h"
 #include "youtubemusic/youtubemusicnameutils.h"
 #include "youtubemusic/youtubemusicrequest.h"
 #include "youtubemusic/youtubemusicwalk.h"
@@ -655,18 +656,7 @@ void YouTubeMusicService::IndexLibrary(const int max_artists) {
   }
 
   // Staleness comes from the index table; missing rows sort first so a fresh install indexes.
-  QHash<QString, qint64> stamps;
-  {
-    QMutexLocker locker(database_->Mutex());
-    QSqlDatabase db = database_->Connect();
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT artist_id, indexed_at FROM youtubemusic_index"));
-    if (!q.Exec()) {
-      database_->ReportErrors(q);
-      return;
-    }
-    while (q.next()) stamps.insert(q.value(0).toString(), q.value(1).toLongLong());
-  }
+  const QHash<QString, qint64> stamps = YouTubeMusicStore::ReadStamps(database_);
 
   const qint64 now = QDateTime::currentSecsSinceEpoch();
   const qint64 ttl = static_cast<qint64>(YouTubeMusicSettings::kIndexTtlDays) * 24 * 60 * 60;
@@ -735,15 +725,7 @@ void YouTubeMusicService::PrefetchNextArtist() {
   const QStringList recent = s.value(YouTubeMusicSettings::kRecentArtists).toStringList();
   s.endGroup();
 
-  QHash<QString, qint64> stamps;
-  {
-    QMutexLocker locker(database_->Mutex());
-    QSqlDatabase db = database_->Connect();
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT artist_id, indexed_at FROM youtubemusic_index"));
-    if (!q.Exec()) return;
-    while (q.next()) stamps.insert(q.value(0).toString(), q.value(1).toLongLong());
-  }
+  const QHash<QString, qint64> stamps = YouTubeMusicStore::ReadStamps(database_);
 
   const qint64 now = QDateTime::currentSecsSinceEpoch();
   const qint64 ttl = static_cast<qint64>(YouTubeMusicSettings::kIndexTtlDays) * 24 * 60 * 60;
@@ -895,15 +877,7 @@ void YouTubeMusicService::FinishIndexAlbum() {
     return;
   }
 
-  {
-    QMutexLocker locker(database_->Mutex());
-    QSqlDatabase db = database_->Connect();
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("INSERT OR REPLACE INTO youtubemusic_index (artist_id, indexed_at) VALUES (?, ?)"));
-    q.addBindValue(index_artist_ids_.value(index_cursor_));
-    q.addBindValue(QDateTime::currentSecsSinceEpoch());
-    if (!q.Exec()) database_->ReportErrors(q);
-  }
+  YouTubeMusicStore::WriteStamp(database_, index_artist_ids_.value(index_cursor_), QDateTime::currentSecsSinceEpoch());
 
   qLog(Info) << "YouTubeMusic: indexed" << index_artist_names_.value(index_cursor_)
              << "(" << index_albums_total_ << "albums )";
@@ -1084,56 +1058,28 @@ void YouTubeMusicService::MergeCollaborationArtists() {
   // *entities* ("The Chainsmokers & Coldplay", "Berg & Vermont (BR)"), which used to appear as
   // extra artists. A collaboration is folded into a subscribed artist only when one of its parts
   // is itself subscribed, so real band names ("Chase & Status", "Of Mice & Men") stay untouched.
+  // The queries live in YouTubeMusicStore so their behaviour is tested against a real database.
   QHash<QString, QString> subscribed;   // lower-case name -> canonical name
-  {
-    QMutexLocker locker(database_->Mutex());
-    QSqlDatabase db = database_->Connect();
-    SqlQuery q(db);
-    // The liked-artists shelf is stored as rows without an album or a song; the songs table
-    // only lists artists of liked songs, which is not the subscription list.
-    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs "
-                             "WHERE coalesce(album_id, '') = '' AND coalesce(song_id, '') = '' AND artist <> ''"));
-    if (!q.Exec()) {
-      database_->ReportErrors(q);
-      return;
-    }
-    while (q.next()) {
-      const QString name = q.value(0).toString().trimmed();
-      if (!name.isEmpty() && !subscribed.contains(name.toLower())) subscribed.insert(name.toLower(), name);
-    }
+  for (const QString &name : YouTubeMusicStore::SubscribedNames(database_)) {
+    const QString trimmed = name.trimmed();
+    if (!trimmed.isEmpty() && !subscribed.contains(trimmed.toLower())) subscribed.insert(trimmed.toLower(), trimmed);
   }
 
   if (subscribed.isEmpty()) return;
 
   QHash<QString, QString> merges;   // collaboration name -> subscribed artist
-  {
-    QMutexLocker locker(database_->Mutex());
-    QSqlDatabase db = database_->Connect();
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs WHERE artist <> ''"));
-    if (!q.Exec()) return;
-    QStringList names;
-    while (q.next()) names << q.value(0).toString();
-    locker.unlock();
-
-    for (const QString &name : std::as_const(names)) {
-      const QString target = YouTubeMusicNames::FoldTarget(name, subscribed);
-      if (!target.isEmpty()) merges.insert(name, target);
-    }
+  for (const QString &name : YouTubeMusicStore::TreeNames(database_)) {
+    const QString target = YouTubeMusicNames::FoldTarget(name, subscribed);
+    if (!target.isEmpty()) merges.insert(name, target);
   }
 
-  if (merges.isEmpty()) {
-    qLog(Info) << "YouTubeMusic: no collaboration artists to fold";
-  }
-
-  QMutexLocker locker(database_->Mutex());
-  QSqlDatabase db = database_->Connect();
   for (auto it = merges.cbegin(); it != merges.cend(); ++it) {
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("UPDATE youtubemusic_artists_songs SET artist = ? WHERE artist = ?"));
-    q.addBindValue(it.value());
-    q.addBindValue(it.key());
-    if (!q.Exec()) database_->ReportErrors(q);
+    QMutexLocker locker(database_->Mutex());
+    SqlQuery query(database_->Connect());
+    query.prepare(QStringLiteral("UPDATE youtubemusic_artists_songs SET artist = ? WHERE artist = ?"));
+    query.addBindValue(it.value());
+    query.addBindValue(it.key());
+    if (!query.Exec()) database_->ReportErrors(query);
   }
 
   qLog(Info) << "YouTubeMusic: folded" << merges.count() << "collaboration artist(s) into subscribed artists";
@@ -1141,33 +1087,8 @@ void YouTubeMusicService::MergeCollaborationArtists() {
   // Strict: the artist browser shows the subscription list, so rows that ended up under an
   // artist the user does not follow (album credits such as "Samantha Machado" on a compilation)
   // are dropped from the tree. They stay reachable from the Albums and Songs tabs.
-  QHash<QString, QString> subscribed_after;
-  {
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs "
-                             "WHERE coalesce(album_id, '') = '' AND coalesce(song_id, '') = '' AND artist <> ''"));
-    if (!q.Exec()) {
-      database_->ReportErrors(q);
-      return;
-    }
-    while (q.next()) subscribed_after.insert(q.value(0).toString(), q.value(0).toString());
-  }
-
-  // The decision (which names to drop, and whether to drop anything at all) is made by the tested
-  // planner: without a subscription list the DELETE would match every row in the tree, and a list
-  // that condemns most of the tree is incomplete rather than the tree being wrong.
-  QStringList tree_names;
-  {
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs WHERE artist <> ''"));
-    if (!q.Exec()) {
-      database_->ReportErrors(q);
-      return;
-    }
-    while (q.next()) tree_names << q.value(0).toString();
-  }
-
-  const YouTubeMusicNames::CleanupPlan plan = YouTubeMusicNames::PlanStrictCleanup(tree_names, subscribed_after.values());
+  const YouTubeMusicNames::CleanupPlan plan =
+      YouTubeMusicNames::PlanStrictCleanup(YouTubeMusicStore::TreeNames(database_), YouTubeMusicStore::SubscribedNames(database_));
   const QStringList strays = plan.remove;
 
   if (plan.refused) {
@@ -1180,43 +1101,16 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     return;
   }
 
-  // (the delete loop follows)
-  for (const QString &artist : std::as_const(strays)) {
-    SqlQuery q(db);
-    q.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE artist = ?"));
-    q.addBindValue(artist);
-    if (!q.Exec()) {
-      database_->ReportErrors(q);
-      return;
-    }
+  for (const QString &artist : strays) {
+    YouTubeMusicStore::RemoveArtist(database_, artist);
   }
-
   if (!strays.isEmpty()) {
     qLog(Info) << "YouTubeMusic: removed" << strays.count() << "artist(s) that are not subscribed:" << strays.join(u", "_s);
   }
 
   // An album row whose pages never yielded a track opens to nothing: drop it from the tree.
   // If a later walk finds tracks for it, the row comes back with them.
-  if (startup_cleanup_dry_run_) {
-    SqlQuery would(db);
-    would.prepare(QStringLiteral("SELECT count(*) FROM youtubemusic_artists_songs WHERE album_id <> '' AND album_id IN ("
-                                 "SELECT album_id FROM youtubemusic_artists_songs WHERE album_id <> '' "
-                                 "GROUP BY album_id HAVING sum(CASE WHEN coalesce(song_id, '') <> '' THEN 1 ELSE 0 END) = 0)"));
-    if (would.Exec() && would.next()) {
-      qLog(Info) << "YouTubeMusic: dry run - would remove" << would.value(0).toInt() << "album row(s) without tracks";
-    }
-    return;
-  }
-
-  SqlQuery empty(db);
-  empty.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE album_id <> '' AND album_id IN ("
-                               "SELECT album_id FROM youtubemusic_artists_songs WHERE album_id <> '' "
-                               "GROUP BY album_id HAVING sum(CASE WHEN coalesce(song_id, '') <> '' THEN 1 ELSE 0 END) = 0)"));
-  if (!empty.Exec()) {
-    database_->ReportErrors(empty);
-    return;
-  }
-  const int empty_albums = empty.numRowsAffected();
+  const int empty_albums = YouTubeMusicStore::RemoveAlbumsWithoutTracks(database_);
   if (empty_albums > 0) {
     qLog(Info) << "YouTubeMusic: removed" << empty_albums << "album row(s) that have no tracks";
   }
