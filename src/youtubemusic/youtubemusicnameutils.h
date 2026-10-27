@@ -38,6 +38,19 @@ QString BestSubscribedMatch(const QString &name, const QHash<QString, QString> &
 // A name that is itself subscribed is never folded.
 QString FoldTarget(const QString &name, const QHash<QString, QString> &subscribed);
 
+// What the strict cleanup would do to the artist tree, decided without touching the database.
+struct CleanupPlan {
+  QStringList remove;
+  // Set when the tree is left alone: without a subscription list the delete would match every
+  // row, and a list that condemns more than half of the tree means the list itself is suspect.
+  bool refused = false;
+  QString reason;
+};
+
+// Names in the tree that are not in the subscription list. Refuses (returns nothing) when the
+// subscription list is empty or when it would remove more than half of the tree.
+CleanupPlan PlanStrictCleanup(const QStringList &tree_names, const QStringList &subscribed_names);
+
 }  // namespace YouTubeMusicNames
 
 #endif  // YOUTUBEMUSICNAMEUTILS_H

@@ -14,6 +14,7 @@
 #include <QHash>
 #include <QRegularExpression>
 #include <QString>
+#include <QSet>
 #include <QStringList>
 
 using namespace Qt::Literals::StringLiterals;
@@ -86,6 +87,36 @@ QString FoldTarget(const QString &name, const QHash<QString, QString> &subscribe
   }
 
   return QString();
+
+}
+
+CleanupPlan PlanStrictCleanup(const QStringList &tree_names, const QStringList &subscribed_names) {
+
+  CleanupPlan plan;
+
+  if (subscribed_names.isEmpty()) {
+    plan.refused = true;
+    plan.reason = u"no subscription list available"_s;
+    return plan;
+  }
+
+  QSet<QString> subscribed;
+  for (const QString &name : subscribed_names) subscribed.insert(name);
+
+  for (const QString &name : tree_names) {
+    if (name.isEmpty()) continue;
+    if (!subscribed.contains(name)) plan.remove << name;
+  }
+
+  // Defence in depth: condemning most of the tree means the subscription list is incomplete,
+  // not that the tree is wrong.
+  if (!tree_names.isEmpty() && plan.remove.count() * 2 > tree_names.count()) {
+    plan.refused = true;
+    plan.reason = u"the subscription list looks incomplete"_s;
+    plan.remove.clear();
+  }
+
+  return plan;
 
 }
 

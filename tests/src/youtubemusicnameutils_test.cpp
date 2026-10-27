@@ -16,6 +16,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <string>
+
 #include "youtubemusic/youtubemusicnameutils.h"
 
 using namespace Qt::Literals::StringLiterals;
@@ -93,5 +95,56 @@ TEST(YouTubeMusicNamesTest, IgnoresVeryShortNames) {
   subscribed.insert(u"x"_s, u"X"_s);
   // A one-character subscribed name must not match inside every collaboration.
   EXPECT_TRUE(YouTubeMusicNames::FoldTarget(u"Rezz & PVRIS"_s, subscribed).isEmpty());
+
+}
+
+TEST(YouTubeMusicNamesTest, StrictCleanupDropsOnlyUnsubscribedNames) {
+
+  const QStringList tree = {u"Rezz"_s, u"Stromae"_s, u"Samantha Machado"_s, u"Chase & Status & Bou"_s};
+  const QStringList subscribed = {u"Rezz"_s, u"Stromae"_s};
+
+  const YouTubeMusicNames::CleanupPlan plan = YouTubeMusicNames::PlanStrictCleanup(tree, subscribed);
+  EXPECT_FALSE(plan.refused);
+  EXPECT_EQ((QStringList{u"Samantha Machado"_s, u"Chase & Status & Bou"_s}), plan.remove);
+
+}
+
+TEST(YouTubeMusicNamesTest, StrictCleanupRefusesWithoutASubscriptionList) {
+
+  // Without a list every name looks stray. Deleting on that would have wiped the whole tree
+  // (18 066 rows) on a fresh profile where indexing ran before the artists shelf was fetched.
+  const QStringList tree = {u"Rezz"_s, u"Stromae"_s, u"Astrix"_s};
+
+  const YouTubeMusicNames::CleanupPlan plan = YouTubeMusicNames::PlanStrictCleanup(tree, QStringList());
+  EXPECT_TRUE(plan.refused);
+  EXPECT_TRUE(plan.remove.isEmpty());
+  // The reason distinguishes the two guards: this one is about the missing list, not about a
+  // suspicious ratio (the ratio guard would fire here too, since every name looks stray).
+  EXPECT_NE(std::string::npos, plan.reason.toStdString().find("no subscription list"));
+
+}
+
+TEST(YouTubeMusicNamesTest, StrictCleanupRefusesWhenTheListLooksIncomplete) {
+
+  // Two of five (40%) is allowed; three of five (60%) means something is wrong with the list.
+  const QStringList tree = {u"A"_s, u"B"_s, u"C"_s, u"D"_s, u"E"_s};
+
+  const YouTubeMusicNames::CleanupPlan allowed = YouTubeMusicNames::PlanStrictCleanup(tree, {u"A"_s, u"B"_s, u"C"_s});
+  EXPECT_FALSE(allowed.refused);
+  EXPECT_EQ(2, allowed.remove.count());
+
+  const YouTubeMusicNames::CleanupPlan refused = YouTubeMusicNames::PlanStrictCleanup(tree, {u"A"_s, u"B"_s});
+  EXPECT_TRUE(refused.refused);
+  EXPECT_TRUE(refused.remove.isEmpty());
+  EXPECT_NE(std::string::npos, refused.reason.toStdString().find("incomplete"));
+
+}
+
+TEST(YouTubeMusicNamesTest, StrictCleanupLeavesACleanTreeAlone) {
+
+  const QStringList names = {u"Rezz"_s, u"Stromae"_s};
+  const YouTubeMusicNames::CleanupPlan plan = YouTubeMusicNames::PlanStrictCleanup(names, names);
+  EXPECT_FALSE(plan.refused);
+  EXPECT_TRUE(plan.remove.isEmpty());
 
 }

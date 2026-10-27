@@ -1153,34 +1153,25 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     while (q.next()) subscribed_after.insert(q.value(0).toString(), q.value(0).toString());
   }
 
-  // Guard: with no subscription list the DELETE below matches every row in the tree. That
-  // happens on a fresh profile where indexing ran before the artists shelf was fetched, or when
-  // that fetch failed - so refuse rather than wipe the table.
-  if (subscribed_after.isEmpty()) {
-    qLog(Warning) << "YouTubeMusic: no subscription list available, skipping the strict cleanup";
-    return;
+  // The decision (which names to drop, and whether to drop anything at all) is made by the tested
+  // planner: without a subscription list the DELETE would match every row in the tree, and a list
+  // that condemns most of the tree is incomplete rather than the tree being wrong.
+  QStringList tree_names;
+  {
+    SqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs WHERE artist <> ''"));
+    if (!q.Exec()) {
+      database_->ReportErrors(q);
+      return;
+    }
+    while (q.next()) tree_names << q.value(0).toString();
   }
 
-  SqlQuery stray(db);
-  stray.prepare(QStringLiteral("SELECT DISTINCT artist FROM youtubemusic_artists_songs "
-                               "WHERE artist <> '' AND artist NOT IN (SELECT artist FROM youtubemusic_artists_songs "
-                               "WHERE coalesce(album_id, '') = '' AND coalesce(song_id, '') = '' AND artist <> '')"));
-  if (!stray.Exec()) {
-    database_->ReportErrors(stray);
-    return;
-  }
-  QStringList strays;
-  while (stray.next()) strays << stray.value(0).toString();
+  const YouTubeMusicNames::CleanupPlan plan = YouTubeMusicNames::PlanStrictCleanup(tree_names, subscribed_after.values());
+  const QStringList strays = plan.remove;
 
-  // Defence in depth: if more than half of the names look stray, something is wrong with the
-  // subscription list; leave the tree alone and say so.
-  SqlQuery total_q(db);
-  total_q.prepare(QStringLiteral("SELECT count(DISTINCT artist) FROM youtubemusic_artists_songs"));
-  int total_artists = 0;
-  if (total_q.Exec() && total_q.next()) total_artists = total_q.value(0).toInt();
-  if (total_artists > 0 && strays.count() * 2 > total_artists) {
-    qLog(Warning) << "YouTubeMusic: refusing to drop" << strays.count() << "of" << total_artists
-                  << "artists - the subscription list looks incomplete";
+  if (plan.refused) {
+    qLog(Warning) << "YouTubeMusic: not touching the artist tree -" << plan.reason;
     return;
   }
 
@@ -1189,6 +1180,7 @@ void YouTubeMusicService::MergeCollaborationArtists() {
     return;
   }
 
+  // (the delete loop follows)
   for (const QString &artist : std::as_const(strays)) {
     SqlQuery q(db);
     q.prepare(QStringLiteral("DELETE FROM youtubemusic_artists_songs WHERE artist = ?"));
