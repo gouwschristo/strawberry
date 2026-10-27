@@ -33,6 +33,7 @@
 #include <QApplication>
 #include <QObject>
 #include <QWidget>
+#include <QWindow>
 #include <QScreen>
 #include <QMetaObject>
 #include <QThread>
@@ -1121,6 +1122,26 @@ MainWindow::MainWindow(Application *app,
     restoreGeometry(settings.value(MainWindowSettings::kGeometry).toByteArray());
   }
 
+  // Wayland ignores window positions (the compositor places the window), and restoreGeometry()
+  // above only encodes a screen position. Requesting the remembered screen before the window is
+  // mapped is the one placement hint Qt can pass on; X11 keeps using the geometry above.
+  const QString remembered_screen = settings.value(MainWindowSettings::kScreen).toString();
+  QStringList available_screens;
+  for (const QScreen *screen : QGuiApplication::screens()) available_screens << screen->name();
+  qLog(Debug) << "Window screen: remembered" << remembered_screen << "available" << available_screens.join(u", "_s);
+  if (!remembered_screen.isEmpty()) {
+    for (const QScreen *screen : QGuiApplication::screens()) {
+      if (screen->name() != remembered_screen) continue;
+      // A native window is needed to talk to the platform plugin about its screen.
+      createWinId();
+      if (QWindow *handle = windowHandle()) {
+        handle->setScreen(const_cast<QScreen *>(screen));
+        qLog(Info) << "Restoring window on screen" << remembered_screen;
+      }
+      break;
+    }
+  }
+
   if (!settings.contains(MainWindowSettings::kSplitterState) || !ui_->splitter->restoreState(settings.value(MainWindowSettings::kSplitterState).toByteArray())) {
     ui_->splitter->setSizes(QList<int>() << 20 << (width() - 20));
   }
@@ -1775,6 +1796,13 @@ void MainWindow::SaveGeometry() {
   s.setValue(MainWindowSettings::kMinimized, isMinimized());
   s.setValue(MainWindowSettings::kHidden, isHidden());
   s.setValue(MainWindowSettings::kGeometry, saveGeometry());
+
+  // Remember which screen this is, by name: indexes change when monitors are added or reordered.
+  QString screen_name;
+  if (const QScreen *screen = (windowHandle() ? windowHandle()->screen() : QGuiApplication::screenAt(frameGeometry().center()))) {
+    screen_name = screen->name();
+  }
+  s.setValue(MainWindowSettings::kScreen, screen_name);
   s.setValue(MainWindowSettings::kSplitterState, ui_->splitter->saveState());
   s.endGroup();
 

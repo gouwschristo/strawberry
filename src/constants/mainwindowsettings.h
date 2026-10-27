@@ -29,6 +29,9 @@ constexpr char kMaximized[] = "maximized";
 constexpr char kMinimized[] = "minimized";
 constexpr char kHidden[] = "hidden";
 constexpr char kGeometry[] = "geometry";
+// Name of the screen the window was last on. Wayland ignores window positions, so the screen
+// has to be requested explicitly on the next start.
+constexpr char kScreen[] = "screen";
 constexpr char kSplitterState[] = "splitter_state";
 constexpr char kDoNotShowSponsorMessage[] = "do_not_show_sponsor_message";
 constexpr char kFilePath[] = "file_path";
