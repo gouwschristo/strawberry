@@ -135,6 +135,7 @@ class YouTubeMusicService : public StreamingService {
   void LoginWithBrowser();
   void LogoutBrowser();
   bool oauth_authenticated() const;
+  QString oauth_access_token() const;
   QString oauth_client_id() const { return oauth_client_id_; }
   QString oauth_client_secret() const { return oauth_client_secret_; }
   // Re-imports the browser cookies shortly after start so the first request does not stall.

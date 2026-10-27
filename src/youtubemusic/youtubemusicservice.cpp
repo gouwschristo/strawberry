@@ -353,6 +353,18 @@ void YouTubeMusicService::LogoutBrowser() {
 
 }
 
+QString YouTubeMusicService::oauth_access_token() const {
+
+  if (oauth_ && oauth_->authenticated()) return oauth_->access_token();
+
+  Settings s;
+  s.beginGroup(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
+  const QString stored = s.value(u"access_token"_s).toString();
+  s.endGroup();
+  return stored;
+
+}
+
 bool YouTubeMusicService::oauth_authenticated() const {
 
   return oauth_ && oauth_->authenticated() && !oauth_->access_token().isEmpty();
