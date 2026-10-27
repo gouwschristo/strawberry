@@ -725,12 +725,14 @@ void CollectionModel::AddSongsInternal(const SongList &songs) {
         container_key = container->container_key;
       }
       else {
-        // A row with no album has nothing to say about the album level: listing it under
-        // an "Unknown" album would add a level the user has to drill into for no reason.
-        // Same for a descriptor row (album/artist page) and for a row without an artist
-        // name at an artist level.
-        if (IsAlbumGroupBy(group_by) && song.album().isEmpty()) break;
-        if (IsArtistGroupBy(group_by) && song.artist().isEmpty()) break;
+        // Streaming rows carry a service id and are named by the artist whose walk produced
+        // them, so a missing album/artist name means "no such level" rather than "unknown":
+        // an extra "Unknown" level would only add a drill-down. Scoped to the streaming
+        // source on purpose - the local collection keeps its Unknown container, which
+        // CollectionModelTest.UnknownArtists/UnknownAlbums protect.
+        const bool streaming_row = song.source() == Song::Source::YouTubeMusic;
+        if (streaming_row && IsAlbumGroupBy(group_by) && song.album().isEmpty()) break;
+        if (streaming_row && IsArtistGroupBy(group_by) && song.artist().isEmpty()) break;
         const QString level_key = ContainerKey(group_by, song, has_unique_album_identifier);
         if (!container_key.isEmpty()) container_key.append(u'-');
         container_key.append(level_key);
@@ -750,15 +752,20 @@ void CollectionModel::AddSongsInternal(const SongList &songs) {
   // Each pair triggers CollectionFilter::filterAcceptsRow re-evaluation across the proxy,
   // so collapsing thousands of per-song inserts into a per-container handful is what keeps the UI responsive on large metadata batches.
   for (CollectionItem *container : std::as_const(insertion_order)) {
-    const SongList &container_songs = songs_by_container.value(container);
+    // The container already exists; a descriptor row adds no information to the tree (it used
+    // to show up as a copy of its own container or as a blank line). Filter them out *before*
+    // announcing the insert, so the row count told to the view matches what is inserted.
+    SongList container_songs;
+    for (const Song &song : songs_by_container.value(container)) {
+      if (!IsContainerDescriptor(song)) container_songs << song;
+    }
+    if (container_songs.isEmpty()) continue;
+
     const int first = static_cast<int>(container->children.count());
     const int last = first + static_cast<int>(container_songs.count()) - 1;
 
     if (!bulk_mode_) beginInsertRows(ItemToIndex(container), first, last);
     for (const Song &song : container_songs) {
-      // The container already exists; a descriptor row adds no information to the tree
-      // (it used to show up as a copy of its own container or as a blank line).
-      if (IsContainerDescriptor(song)) continue;
       CollectionItem *item = new CollectionItem(CollectionItem::Type::Song, container);
       SetSongItemData(item, song);
       song_nodes_.insert(song.id(), item);
