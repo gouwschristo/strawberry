@@ -315,6 +315,10 @@ void YouTubeMusicService::LoginWithBrowser() {
     oauth_->set_settings_group(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
     oauth_->set_type(OAuthenticator::Type::Authorization_Code);
     oauth_->set_authorize_url(QUrl(u"https://accounts.google.com/o/oauth2/v2/auth"_s));
+    // OAuthenticator builds redirect_uri from this and adds the local server's port, so only the
+    // scheme/host/path belong here. Leaving it unset produced "redirect_uri=//:35327", which
+    // Google rejects as invalid_request.
+    oauth_->set_redirect_url(QUrl(u"http://127.0.0.1/"_s));
     oauth_->set_access_token_url(QUrl(u"https://oauth2.googleapis.com/token"_s));
     // Desktop clients use PKCE, so only the (public) client id is needed.
     oauth_->set_scope(u"https://www.googleapis.com/auth/youtube"_s);
