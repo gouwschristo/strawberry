@@ -1521,6 +1521,7 @@ optional_source(HAVE_YOUTUBEMUSIC
   SOURCES
     src/youtubemusic/youtubemusicservice.cpp
     src/youtubemusic/youtubemusicclient.cpp
+    src/youtubemusic/youtubemusicindexlogic.cpp
     src/youtubemusic/youtubemusicnameutils.cpp
     src/youtubemusic/youtubemusicwalk.cpp
     src/youtubemusic/youtubemusicurlhandler.cpp
@@ -1533,6 +1534,7 @@ optional_source(HAVE_YOUTUBEMUSIC
   HEADERS
     src/youtubemusic/youtubemusicservice.h
     src/youtubemusic/youtubemusicclient.h
+  src/youtubemusic/youtubemusicindexlogic.h
   src/youtubemusic/youtubemusicnameutils.h
   src/youtubemusic/youtubemusicwalk.h
   src/youtubemusic/youtubemusicurlhandler.h

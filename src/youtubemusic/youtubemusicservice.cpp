@@ -37,6 +37,7 @@
 #include "streaming/streamingservice.h"
 #include "constants/youtubemusicconstants.h"
 #include "constants/youtubemusicsettings.h"
+#include "youtubemusic/youtubemusicindexlogic.h"
 #include "youtubemusic/youtubemusicnameutils.h"
 #include "youtubemusic/youtubemusicrequest.h"
 #include "youtubemusic/youtubemusicwalk.h"
@@ -669,21 +670,16 @@ void YouTubeMusicService::IndexLibrary(const int max_artists) {
 
   const qint64 now = QDateTime::currentSecsSinceEpoch();
   const qint64 ttl = static_cast<qint64>(YouTubeMusicSettings::kIndexTtlDays) * 24 * 60 * 60;
-  QList<Candidate> stale;
-  for (const Candidate &candidate : std::as_const(candidates)) {
-    const auto stamp = stamps.constFind(candidate.id);
-    if (stamp != stamps.cend() && now - stamp.value() < ttl) continue;
-    stale << candidate;
-  }
-  std::sort(stale.begin(), stale.end(), [&stamps](const Candidate &a, const Candidate &b) {
-    return stamps.value(a.id) < stamps.value(b.id);
-  });
 
-  if (max_artists > 0 && stale.count() > max_artists) stale = stale.mid(0, max_artists);
+  QList<YouTubeMusicIndexLogic::Candidate> index_candidates;
+  for (const Candidate &candidate : std::as_const(candidates)) {
+    index_candidates << YouTubeMusicIndexLogic::Candidate{candidate.id, candidate.name};
+  }
 
   QStringList ids;
   QStringList names;
-  for (const Candidate &candidate : std::as_const(stale)) {
+  for (const YouTubeMusicIndexLogic::Candidate &candidate :
+       YouTubeMusicIndexLogic::StaleArtists(index_candidates, stamps, now, ttl, max_artists)) {
     ids << candidate.id;
     names << candidate.name;
   }
@@ -752,8 +748,7 @@ void YouTubeMusicService::PrefetchNextArtist() {
   const qint64 now = QDateTime::currentSecsSinceEpoch();
   const qint64 ttl = static_cast<qint64>(YouTubeMusicSettings::kIndexTtlDays) * 24 * 60 * 60;
   auto is_stale = [&stamps, now, ttl](const QString &id) {
-    const auto stamp = stamps.constFind(id);
-    return stamp == stamps.cend() || now - stamp.value() >= ttl;
+    return YouTubeMusicIndexLogic::IsStale(id, stamps, now, ttl);
   };
 
   // Preferred: what the user just looked at.
@@ -879,17 +874,8 @@ void YouTubeMusicService::StartIndexAlbumsWalk() {
                        SongList tracks = songs.values();
                        // The album page lists tracks with title + duration only, so the album
                        // context comes from the album row this walk used.
-                       const Song album = index_albums_.value(index);
-                       const QString walked_artist = index_artist_names_.value(index_cursor_);
-                       for (Song &track : tracks) {
-                         if (track.album().isEmpty() && !album.album().isEmpty()) track.set_album(album.album());
-                         if (track.album_id().isEmpty() && !album.album_id().isEmpty()) track.set_album_id(album.album_id());
-                         const QString artist = walked_artist.isEmpty() ? album.artist() : walked_artist;
-                         if (!artist.isEmpty()) {
-                           track.set_artist(artist);
-                           track.set_albumartist(artist);
-                         }
-                       }
+                       YouTubeMusicIndexLogic::ApplyAlbumContext(tracks, index_albums_.value(index),
+                                                                index_artist_names_.value(index_cursor_));
                        artists_collection_backend_->AddOrUpdateSongsAsync(tracks);
                      }
                    },
