@@ -212,6 +212,7 @@ void YouTubeMusicService::ReloadSettings() {
   download_format_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadFormat), u"opus"_s).toString();
   download_embed_thumbnail_ = s.value(QLatin1String(YouTubeMusicSettings::kDownloadEmbedThumbnail), true).toBool();
   oauth_client_id_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientId)).toString().trimmed();
+  oauth_client_secret_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientSecret)).toString().trimmed();
   oauth_enabled_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthEnabled), false).toBool();
   cookies_browser_ = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
   cookies_script_ = s.value(QLatin1String(YouTubeMusicSettings::kCookiesScript),
@@ -294,8 +295,18 @@ void YouTubeMusicService::SignOut() {
 
 void YouTubeMusicService::LoginWithBrowser() {
 
+  // Re-read: the settings page writes the fields immediately before calling this.
+  {
+    Settings s;
+    s.beginGroup(QLatin1String(YouTubeMusicSettings::kSettingsGroup));
+    oauth_client_id_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientId)).toString().trimmed();
+    oauth_client_secret_ = s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientSecret)).toString().trimmed();
+    s.endGroup();
+  }
+
   if (oauth_client_id_.isEmpty()) {
-    Q_EMIT SongsUpdateStatus(tr("Set the Google OAuth client id first (Settings > YouTube Music)."));
+    qLog(Warning) << "YouTubeMusic: browser sign-in needs a Google OAuth client id";
+    Q_EMIT BrowserLoginFinished(false, tr("Set the Google OAuth client id first (paste it, or use \"Import client JSON\")."));
     return;
   }
 
@@ -309,18 +320,24 @@ void YouTubeMusicService::LoginWithBrowser() {
     oauth_->set_scope(u"https://www.googleapis.com/auth/youtube"_s);
     oauth_->set_use_local_redirect_server(true);
     oauth_->set_random_port(true);
+    // Google rejects "localhost" for loopback redirects and requires the IP literal.
+    oauth_->set_local_redirect_host(u"127.0.0.1"_s);
     QObject::connect(oauth_, &OAuthenticator::Error, this, [](const QString &error) {
       qLog(Error) << "YouTubeMusic: OAuth error:" << error;
     });
     QObject::connect(oauth_, &OAuthenticator::AuthenticationFinished, this, [this](const bool success, const QString &error) {
       qLog(Info) << "YouTubeMusic: OAuth finished, success:" << success << error;
       Q_EMIT SongsUpdateStatus(success ? tr("Signed in with the browser.") : tr("Sign-in failed: %1").arg(error));
+      Q_EMIT BrowserLoginFinished(success, success ? tr("Signed in with the browser.") : error);
     });
   }
 
   oauth_->set_client_id(oauth_client_id_);
+  // Desktop clients do send their (non-confidential) secret; PKCE is the actual protection.
+  oauth_->set_client_secret(oauth_client_secret_);
   oauth_->LoadSession();
   oauth_->Authenticate();
+  qLog(Info) << "YouTubeMusic: browser sign-in started for client id" << oauth_client_id_.left(20) + u"..."_s;
 
 }
 

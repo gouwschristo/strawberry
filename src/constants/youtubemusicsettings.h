@@ -36,6 +36,7 @@ constexpr char kRecentArtists[] = "recent_artists";
 // Desktop clients use PKCE, so no secret is stored.
 constexpr char kOAuthClientId[] = "oauth_client_id";
 constexpr char kOAuthEnabled[] = "oauth_enabled";
+constexpr char kOAuthClientSecret[] = "oauth_client_secret";
 // index artists in the background while the app is idle
 constexpr char kPrefetchIndex[] = "prefetch_index";
 // tidy the artist tree at startup (fold collaborations, drop unsubscribed artists and empty

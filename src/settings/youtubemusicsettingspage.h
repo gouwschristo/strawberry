@@ -42,6 +42,7 @@ class YouTubeMusicSettingsPage : public SettingsPage {
   void SignOut();
   void IndexLibrary();
   void LoginWithBrowser();
+  void ImportClientJson();
   void ImportCookies();
   void UpdateLoginState();
 
@@ -54,6 +55,8 @@ class YouTubeMusicSettingsPage : public SettingsPage {
   QPushButton *button_sign_out_;
   QPushButton *button_index_library_;
   QLineEdit *lineedit_oauth_client_id_;
+  QLineEdit *lineedit_oauth_client_secret_;
+  QPushButton *button_import_client_json_;
   QPushButton *button_login_browser_;
   QCheckBox *checkbox_prefetch_index_;
   QCheckBox *checkbox_startup_cleanup_;

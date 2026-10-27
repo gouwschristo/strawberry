@@ -20,6 +20,11 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QFile>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QSpinBox>
@@ -45,6 +50,8 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
       button_sign_out_(new QPushButton(tr("Sign out"), this)),
       button_index_library_(new QPushButton(tr("Index library"), this)),
       lineedit_oauth_client_id_(new QLineEdit(this)),
+      lineedit_oauth_client_secret_(new QLineEdit(this)),
+      button_import_client_json_(new QPushButton(tr("Import client JSON..."), this)),
       button_login_browser_(new QPushButton(tr("Sign in with the browser (OAuth)"), this)),
       checkbox_prefetch_index_(new QCheckBox(tr("Keep indexing in the background (one artist at a time, most recently browsed first)"), this)),
       checkbox_startup_cleanup_(new QCheckBox(tr("Tidy the artist list at startup (fold collaborations, hide artists you do not follow)"), this)),
@@ -97,12 +104,26 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   layout_browser->addRow(tr("Read cookies from:"), combobox_cookies_browser_);
   layout_login->addLayout(layout_browser);
 
+  if (service_) {
+    QObject::connect(service_.get(), &YouTubeMusicService::BrowserLoginFinished, this, [this](const bool success, const QString &message) {
+      label_login_state_->setText(success ? tr("Signed in with the browser.") : tr("Sign-in failed."));
+      QMessageBox box(success ? QMessageBox::Information : QMessageBox::Warning, tr("Browser sign-in"),
+                      success ? tr("Signed in. The session is stored and refreshed automatically.") : message, QMessageBox::Ok, this);
+      box.exec();
+    });
+  }
+
   lineedit_oauth_client_id_->setPlaceholderText(u"1234-abcd.apps.googleusercontent.com"_s);
   lineedit_oauth_client_id_->setToolTip(tr("Client id of a \"Desktop app\" OAuth client from your own Google Cloud project. "
                                            "No secret is needed: desktop clients use PKCE. This gives a refresh token, so the "
                                            "session does not expire with the browser cookies."));
   QFormLayout *layout_oauth = new QFormLayout();
+  lineedit_oauth_client_secret_->setEchoMode(QLineEdit::Password);
+  lineedit_oauth_client_secret_->setToolTip(tr("Only needed for the token exchange. Google does not treat a desktop "
+                                               "client's secret as confidential, but it is kept out of any log."));
   layout_oauth->addRow(tr("OAuth client id:"), lineedit_oauth_client_id_);
+  layout_oauth->addRow(tr("OAuth client secret:"), lineedit_oauth_client_secret_);
+  layout_oauth->addRow(QString(), button_import_client_json_);
   layout_login->addLayout(layout_oauth);
 
   QHBoxLayout *layout_buttons = new QHBoxLayout();
@@ -178,6 +199,7 @@ YouTubeMusicSettingsPage::YouTubeMusicSettingsPage(SettingsDialog *dialog, Share
   QObject::connect(button_sign_out_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::SignOut);
   QObject::connect(button_index_library_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::IndexLibrary);
   QObject::connect(button_login_browser_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::LoginWithBrowser);
+  QObject::connect(button_import_client_json_, &QPushButton::clicked, this, &YouTubeMusicSettingsPage::ImportClientJson);
 
   Load();
 
@@ -197,6 +219,7 @@ void YouTubeMusicSettingsPage::Load() {
   checkbox_prefetch_index_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), true).toBool());
   checkbox_startup_cleanup_->setChecked(s.value(QLatin1String(YouTubeMusicSettings::kStartupCleanup), true).toBool());
   lineedit_oauth_client_id_->setText(s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientId)).toString());
+  lineedit_oauth_client_secret_->setText(s.value(QLatin1String(YouTubeMusicSettings::kOAuthClientSecret)).toString());
   const QString browser = s.value(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), u"chrome"_s).toString();
   const int browser_index = combobox_cookies_browser_->findData(browser);
   if (browser_index >= 0) combobox_cookies_browser_->setCurrentIndex(browser_index);
@@ -227,6 +250,7 @@ void YouTubeMusicSettingsPage::Save() {
   s.setValue(QLatin1String(YouTubeMusicSettings::kPrefetchIndex), checkbox_prefetch_index_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kStartupCleanup), checkbox_startup_cleanup_->isChecked());
   s.setValue(QLatin1String(YouTubeMusicSettings::kOAuthClientId), lineedit_oauth_client_id_->text().trimmed());
+  s.setValue(QLatin1String(YouTubeMusicSettings::kOAuthClientSecret), lineedit_oauth_client_secret_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kCookiesBrowser), combobox_cookies_browser_->currentData().toString());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadDir), lineedit_download_dir_->text().trimmed());
   s.setValue(QLatin1String(YouTubeMusicSettings::kDownloadFormat), combobox_download_format_->currentData().toString());
@@ -328,9 +352,46 @@ void YouTubeMusicSettingsPage::LoginWithBrowser() {
 
   if (!service_) return;
 
-  // The client id is saved with the settings; write it before starting the flow.
+  if (lineedit_oauth_client_id_->text().trimmed().isEmpty()) {
+    QMessageBox::warning(this, tr("Browser sign-in"),
+                         tr("Paste the OAuth client id of a \"Desktop app\" client first, or use \"Import client JSON...\" "
+                            "with the file downloaded from Google Cloud."));
+    return;
+  }
+
+  // The fields are saved before the flow starts: the service re-reads them.
   Save();
   service_->LoginWithBrowser();
   label_login_state_->setText(tr("A browser window will open - sign in there, the loopback redirect completes it."));
+
+}
+
+void YouTubeMusicSettingsPage::ImportClientJson() {
+
+  const QString path = QFileDialog::getOpenFileName(this, tr("Select the client_secret JSON from Google Cloud"), QDir::homePath(),
+                                                    u"JSON files (*.json);;All files (*)"_s);
+  if (path.isEmpty()) return;
+
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    QMessageBox::warning(this, tr("Import client JSON"), tr("Could not read %1").arg(path));
+    return;
+  }
+
+  const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+  // Desktop clients are stored under "installed", web clients under "web".
+  const QJsonObject client = root.contains(u"installed"_s) ? root[u"installed"_s].toObject() : root[u"web"_s].toObject();
+  const QString client_id = client[u"client_id"_s].toString();
+  if (client_id.isEmpty()) {
+    QMessageBox::warning(this, tr("Import client JSON"), tr("That file does not contain a client id (expected the "
+                                                             "client_secret_*.json downloaded from Google Cloud)."));
+    return;
+  }
+
+  lineedit_oauth_client_id_->setText(client_id);
+  lineedit_oauth_client_secret_->setText(client[u"client_secret"_s].toString());
+  Save();
+  QMessageBox::information(this, tr("Import client JSON"),
+                           tr("Client id imported. Press \"Sign in with the browser\" to continue."));
 
 }

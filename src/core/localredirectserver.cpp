@@ -20,6 +20,8 @@
 
 #include "localredirectserver.h"
 
+#include "core/logging.h"
+
 #include <QApplication>
 #include <QIODevice>
 #include <QBuffer>
@@ -59,10 +61,11 @@ bool LocalRedirectServer::Listen() {
   }
 
   url_.setScheme(u"http"_s);
-  url_.setHost(u"localhost"_s);
+  url_.setHost(host_);
   url_.setPort(serverPort());
   url_.setPath(u"/"_s);
   port_ = serverPort();
+  qLog(Info) << "Local redirect server listening on" << url_.toString();
   QObject::connect(this, &QTcpServer::newConnection, this, &LocalRedirectServer::NewConnection);
 
   return true;

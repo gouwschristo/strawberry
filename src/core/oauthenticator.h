@@ -59,6 +59,8 @@ class OAuthenticator : public QObject {
   void set_scope(const QString &scope);
   void set_use_local_redirect_server(const bool use_local_redirect_server);
   void set_random_port(const bool random_port);
+  // Host used in the loopback redirect URL (default "localhost"; Google needs "127.0.0.1").
+  void set_local_redirect_host(const QString &host);
 
   QString token_type() const { return token_type_; }
   QString access_token() const { return access_token_; }
@@ -109,6 +111,7 @@ class OAuthenticator : public QObject {
   QString scope_;
   bool use_local_redirect_server_;
   bool random_port_;
+  QString local_redirect_host_;
 
   QString code_verifier_;
   QString code_challenge_;

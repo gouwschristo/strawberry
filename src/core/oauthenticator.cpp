@@ -134,6 +134,12 @@ void OAuthenticator::set_scope(const QString &scope) {
 
 }
 
+void OAuthenticator::set_local_redirect_host(const QString &host) {
+
+  local_redirect_host_ = host;
+
+}
+
 void OAuthenticator::set_use_local_redirect_server(const bool use_local_redirect_server) {
 
   use_local_redirect_server_ = use_local_redirect_server;
@@ -239,6 +245,7 @@ void OAuthenticator::Authenticate() {
 
   if (use_local_redirect_server_) {
     local_redirect_server_.reset(new LocalRedirectServer(this));
+    if (!local_redirect_host_.isEmpty()) local_redirect_server_->set_host(local_redirect_host_);
     bool success = false;
     if (random_port_) {
       success = local_redirect_server_->Listen();
