@@ -24,9 +24,11 @@
 #include "core/logging.h"
 #include "core/song.h"
 #include "youtubemusic/youtubemusicservice.h"
+#include "youtubemusicparser.h"
 #include "youtubemusicrequest.h"
 
 using namespace Qt::Literals::StringLiterals;
+using namespace YouTubeMusicParser;
 
 namespace {
 
@@ -45,102 +47,9 @@ constexpr char kBrowseLikedSongs[] = "FEmusic_liked_videos";
 
 // Every item in a list or grid: musicResponsiveListItemRenderer (list rows) and
 // musicTwoRowItemRenderer (grid tiles) are the two shapes the web client uses.
-void CollectItems(const QJsonValue &value, QList<QJsonObject> &items, const bool list_rows_only = false) {
-
-  if (value.isObject()) {
-    const QJsonObject object = value.toObject();
-    if (object.contains("musicResponsiveListItemRenderer"_L1)) {
-      items << object["musicResponsiveListItemRenderer"_L1].toObject();
-      return;
-    }
-    if (object.contains("musicTwoRowItemRenderer"_L1)) {
-      if (!list_rows_only) items << object["musicTwoRowItemRenderer"_L1].toObject();
-      return;
-    }
-    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
-      CollectItems(it.value(), items, list_rows_only);
-    }
-  }
-  else if (value.isArray()) {
-    const QJsonArray array = value.toArray();
-    for (const QJsonValue &item : array) {
-      CollectItems(item, items, list_rows_only);
-    }
-  }
-
-}
-
 // Text object: either {"simpleText": "..."} or {"runs": [{"text": "..."}, ...]}.
-QStringList TextRuns(const QJsonValue &value) {
-
-  QStringList ret;
-
-  if (!value.isObject()) return ret;
-
-  const QJsonObject object = value.toObject();
-  if (object.contains("simpleText"_L1)) {
-    ret << object["simpleText"_L1].toString();
-    return ret;
-  }
-
-  const QJsonValue runs = object["runs"_L1];
-  if (runs.isArray()) {
-    const QJsonArray array = runs.toArray();
-    for (const QJsonValue &run : array) {
-      ret << run.toObject()["text"_L1].toString();
-    }
-  }
-
-  return ret;
-
-}
-
-void CollectObjectsWithKey(const QJsonValue &value, const QString &key, QList<QJsonObject> &objects);
-
 // Album pages put "Album • 2004" in the header subtitle - except when that slot carries the
 // label instead ("Album • Alpha Portal"), so only a four digit run counts as a year.
-int AlbumYearFromHeader(const QJsonObject &json_object) {
-
-  static const QRegularExpression year_re(u"^\\d{4}$"_s);
-
-  QList<QJsonObject> headers;
-  CollectObjectsWithKey(json_object, u"musicResponsiveHeaderRenderer"_s, headers);
-  for (const QJsonObject &header : std::as_const(headers)) {
-    const QJsonArray runs = header[u"subtitle"_s].toObject()[u"runs"_s].toArray();
-    for (const QJsonValue &run : runs) {
-      const QString text = run.toObject()[u"text"_s].toString().trimmed();
-      if (!year_re.match(text).hasMatch()) continue;
-      const int year = text.toInt();
-      if (year > 1000) return year;
-    }
-  }
-
-  return -1;
-
-}
-
-void CollectObjectsWithKey(const QJsonValue &value, const QString &key, QList<QJsonObject> &objects) {
-
-  if (value.isObject()) {
-    const QJsonObject object = value.toObject();
-    const QJsonValue found = object[key];
-    if (found.isObject()) {
-      objects << found.toObject();
-      return;
-    }
-    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
-      CollectObjectsWithKey(it.value(), key, objects);
-    }
-  }
-  else if (value.isArray()) {
-    const QJsonArray array = value.toArray();
-    for (const QJsonValue &item : array) {
-      CollectObjectsWithKey(item, key, objects);
-    }
-  }
-
-}
-
 // The largest thumbnail in any "thumbnails" array below the value.
 QUrl LargestThumbnail(const QJsonValue &value) {
 
@@ -197,30 +106,6 @@ QString BrowseId(const QJsonValue &item, const QStringList &wanted_page_types, c
   }
 
   return strict ? QString() : fallback;
-
-}
-
-QString VideoId(const QJsonValue &item) {
-
-  QList<QJsonObject> watch_endpoints;
-  CollectObjectsWithKey(item, u"watchEndpoint"_s, watch_endpoints);
-
-  for (const QJsonObject &watch_endpoint : watch_endpoints) {
-    const QString video_id = watch_endpoint["videoId"_L1].toString();
-    if (!video_id.isEmpty()) return video_id;
-  }
-
-  // Album and playlist rows served in the "playlist" shape carry the id only in
-  // playlistItemData (navigationEndpoint is null). Those rows were skipped, which left whole
-  // singles and community albums without any tracks.
-  QList<QJsonObject> playlist_items;
-  CollectObjectsWithKey(item, u"playlistItemData"_s, playlist_items);
-  for (const QJsonObject &playlist_item : playlist_items) {
-    const QString video_id = playlist_item["videoId"_L1].toString();
-    if (!video_id.isEmpty()) return video_id;
-  }
-
-  return QString();
 
 }
 
